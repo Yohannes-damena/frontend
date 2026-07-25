@@ -1,15 +1,29 @@
 import { act, render } from '@testing-library/react'
 import type { ReactElement } from 'react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import {
+/**
+ * What this suite covers is the store's own rules — draft round-trips, and the
+ * validation that runs before any request is made — so it deliberately runs in
+ * demo mode. The suite-wide VITE_API_BASE_URL exists for the client tests,
+ * which need a live base URL; here it would only mean fetching from a host
+ * that does not exist.
+ *
+ * The mutations are asynchronous in demo mode too, which is the point: the
+ * same call signature has to hold whether an API answers it or not.
+ */
+vi.stubEnv('VITE_API_BASE_URL', '')
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true
+
+const {
   AuthoringStoreProvider,
   createEmptyItemDraft,
   createEmptyRoomDraft,
   toItemDraft,
   toRoomDraft,
   useAuthoringStore,
-} from './authoringStore.tsx'
+} = await import('./authoringStore.tsx')
 
 type Store = ReturnType<typeof useAuthoringStore>
 
@@ -36,10 +50,10 @@ function mount(): void {
 }
 
 /** The store closes over the state of the render that produced it, so each mutation gets its own act(). */
-function run<T>(mutation: (store: Store) => T): T {
+async function run<T>(mutation: (store: Store) => Promise<T>): Promise<T> {
   let result!: T
-  act(() => {
-    result = mutation(current())
+  await act(async () => {
+    result = await mutation(current())
   })
   return result
 }
@@ -55,8 +69,8 @@ describe('rooms', () => {
     expect(current().rooms[0]?.title).toBe('Origins of Adwa')
   })
 
-  it('stores a created room under roomOverviewText', () => {
-    const created = run((s) =>
+  it('stores a created room under roomOverviewText', async () => {
+    const created = await run((s) =>
       s.createRoom({
         ...createEmptyRoomDraft(),
         title: 'Aftermath',
@@ -76,10 +90,13 @@ describe('rooms', () => {
     expect(room).not.toHaveProperty('overviewText')
   })
 
-  it('updates roomOverviewText in place', () => {
+  it('updates roomOverviewText in place', async () => {
     const existing = current().rooms[0]!
-    const outcome = run((s) =>
-      s.updateRoom(existing.id, { ...toRoomDraft(existing), roomOverviewText: 'Rewritten grounding.' }),
+    const outcome = await run((s) =>
+      s.updateRoom(existing.id, {
+        ...toRoomDraft(existing),
+        roomOverviewText: 'Rewritten grounding.',
+      }),
     )
 
     expect(outcome.ok).toBe(true)
@@ -92,9 +109,15 @@ describe('rooms', () => {
     expect(draft).not.toHaveProperty('overviewText')
   })
 
-  it('rejects a duplicate story order', () => {
-    const outcome = run((s) =>
-      s.createRoom({ ...createEmptyRoomDraft(), title: 'Clash', storyOrder: '1' }),
+  it('rejects a duplicate story order', async () => {
+    const outcome = await run((s) =>
+      s.createRoom({
+        ...createEmptyRoomDraft(),
+        title: 'Clash',
+        storyOrder: '1',
+        roomOverviewText: 'Grounding prose.',
+        narrationScript: 'Spoken narration.',
+      }),
     )
 
     expect(outcome.ok).toBe(false)
@@ -102,17 +125,19 @@ describe('rooms', () => {
     expect(outcome.errors.storyOrder).toContain('already used')
   })
 
-  it('rejects a room without a title', () => {
-    const outcome = run((s) => s.createRoom({ ...createEmptyRoomDraft(), storyOrder: '9' }))
+  it('rejects a room without a title', async () => {
+    const outcome = await run((s) =>
+      s.createRoom({ ...createEmptyRoomDraft(), storyOrder: '9' }),
+    )
 
     expect(outcome.ok).toBe(false)
     if (outcome.ok) return
     expect(outcome.errors.title).toBeDefined()
   })
 
-  it('rejects a room that points at itself', () => {
+  it('rejects a room that points at itself', async () => {
     const existing = current().rooms[0]!
-    const outcome = run((s) =>
+    const outcome = await run((s) =>
       s.updateRoom(existing.id, { ...toRoomDraft(existing), nextRoomId: existing.id }),
     )
 
@@ -121,11 +146,11 @@ describe('rooms', () => {
     expect(outcome.errors.nextRoomId).toBeDefined()
   })
 
-  it('cascades to the room items on delete', () => {
+  it('cascades to the room items on delete', async () => {
     const target = current().rooms[0]!
     expect(current().listRoomItems(target.id).length).toBeGreaterThan(0)
 
-    run((s) => s.deleteRoom(target.id))
+    await run((s) => s.deleteRoom(target.id))
 
     expect(current().findRoom(target.id)).toBeUndefined()
     expect(current().listRoomItems(target.id)).toHaveLength(0)
@@ -133,9 +158,9 @@ describe('rooms', () => {
 })
 
 describe('items', () => {
-  it('stores a created item under shortDescription and detailText', () => {
+  it('stores a created item under shortDescription and detailText', async () => {
     const roomId = current().rooms[0]!.id
-    const created = run((s) =>
+    const created = await run((s) =>
       s.createItem(roomId, {
         ...createEmptyItemDraft(),
         name: 'Field Telegram',
@@ -155,9 +180,9 @@ describe('items', () => {
     expect(item).not.toHaveProperty('groundingDetail')
   })
 
-  it('updates both renamed fields in place', () => {
+  it('updates both renamed fields in place', async () => {
     const existing = current().items[0]!
-    const outcome = run((s) =>
+    const outcome = await run((s) =>
       s.updateItem(existing.id, existing.roomId, {
         ...toItemDraft(existing),
         shortDescription: 'Revised visitor copy.',
@@ -182,12 +207,14 @@ describe('items', () => {
     expect(draft).not.toHaveProperty('groundingDetail')
   })
 
-  it('rejects a duplicate display order inside one room', () => {
+  it('rejects a duplicate display order inside one room', async () => {
     const existing = current().items[0]!
-    const outcome = run((s) =>
+    const outcome = await run((s) =>
       s.createItem(existing.roomId, {
         ...createEmptyItemDraft(),
         name: 'Collides',
+        shortDescription: 'Visitor copy.',
+        detailText: 'Grounding copy.',
         displayOrder: String(existing.displayOrder),
       }),
     )
@@ -197,11 +224,11 @@ describe('items', () => {
     expect(outcome.errors.displayOrder).toContain('already used')
   })
 
-  it('removes only the deleted item', () => {
+  it('removes only the deleted item', async () => {
     const target = current().items[0]!
     const before = current().items.length
 
-    run((s) => s.deleteItem(target.id))
+    await run((s) => s.deleteItem(target.id))
 
     expect(current().findItem(target.id)).toBeUndefined()
     expect(current().items).toHaveLength(before - 1)

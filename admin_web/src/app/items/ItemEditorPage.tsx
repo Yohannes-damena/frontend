@@ -5,6 +5,7 @@ import {
   Button,
   ConfirmDialog,
   Field,
+  StateBlock,
   TextArea,
   TextInput,
   useToast,
@@ -30,11 +31,15 @@ export function ItemEditorPage(): ReactElement {
   const { roomId = '', itemId = '' } = useParams()
   const creating = itemId === 'new'
   const { show } = useToast()
-  const { findRoom, findItem, createItem, updateItem, deleteItem } = useAuthoringStore()
+  const { findRoom, findItem, createItem, updateItem, deleteItem, status, loadError, reload } =
+    useAuthoringStore()
 
   const room = findRoom(roomId)
   const existingItem = creating ? undefined : findItem(itemId)
-  const missing = room === undefined || (!creating && existingItem === undefined)
+  // Nothing is "missing" until the museum's content has arrived; a deep link
+  // renders before the first response otherwise.
+  const missing =
+    status !== 'loading' && (room === undefined || (!creating && existingItem === undefined))
 
   const baseline = useMemo(() => {
     if (existingItem === undefined) return createEmptyItemDraft()
@@ -43,11 +48,37 @@ export function ItemEditorPage(): ReactElement {
 
   const [draft, setDraft] = useState<ItemDraft>(baseline)
   const [errors, setErrors] = useState<ItemDraftErrors>(EMPTY_ITEM_ERRORS)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const [discardModalOpen, setDiscardModalOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
 
   const dirty = !itemDraftEquals(draft, baseline)
   const unsavedGuard = useUnsavedChangesGuard(dirty)
+
+  if (status === 'loading') {
+    return (
+      <div className={styles.page}>
+        <StateBlock state={{ kind: 'loading', label: 'item' }} size="page" />
+      </div>
+    )
+  }
+
+  if (status === 'error') {
+    return (
+      <div className={styles.page}>
+        <StateBlock
+          size="page"
+          state={{
+            kind: 'failure',
+            title: 'Could not load this item',
+            body: loadError ?? 'The request failed.',
+            retry: { label: 'Try again', onAct: reload },
+          }}
+        />
+      </div>
+    )
+  }
 
   if (missing) {
     return (
@@ -55,7 +86,7 @@ export function ItemEditorPage(): ReactElement {
         <section className={styles.panelCard}>
           <h1 className="text-title">Item not found</h1>
           <p className={`text-body ${styles.muted}`}>
-            The room or item is missing in fixture state. Return to the room items table.
+            This room or item no longer exists. Return to the room items table.
           </p>
           <Button tone="secondary" onClick={() => navigate('..')}>
             Back to room items
@@ -67,46 +98,63 @@ export function ItemEditorPage(): ReactElement {
 
   function setField<Key extends keyof ItemDraft>(key: Key, value: ItemDraft[Key]): void {
     setDraft((current) => ({ ...current, [key]: value }))
+    setFormError(null)
     if (errors[key as keyof ItemDraftErrors] !== undefined) {
       setErrors((current) => ({ ...current, [key]: undefined }))
     }
   }
 
-  function commitSave(): void {
+  async function commitSave(): Promise<void> {
     if (room === undefined) return
-    if (creating) {
-      const created = createItem(room.id, draft)
-      if (!created.ok) {
-        setErrors(created.errors)
+    setSaving(true)
+    setFormError(null)
+    try {
+      const result = creating
+        ? await createItem(room.id, draft)
+        : await updateItem(itemId, room.id, draft)
+
+      if (!result.ok) {
+        setErrors(result.errors)
+        setFormError(Object.keys(result.errors).length === 0 ? (result.message ?? null) : null)
         return
       }
-      show({ tone: 'success', message: 'Item created.' })
-      unsavedGuard.allowNextNavigation()
-      navigate(`../${created.itemId}`, { replace: true })
-      return
-    }
 
-    const updated = updateItem(itemId, room.id, draft)
-    if (!updated.ok) {
-      setErrors(updated.errors)
-      return
+      setErrors(EMPTY_ITEM_ERRORS)
+      if (creating) {
+        show({ tone: 'success', message: 'Item created.' })
+        unsavedGuard.allowNextNavigation()
+        navigate(`../${result.itemId}`, { replace: true })
+        return
+      }
+      show({ tone: 'success', message: 'Item saved.' })
+    } finally {
+      setSaving(false)
     }
-    show({ tone: 'success', message: 'Item saved.' })
-    setErrors(EMPTY_ITEM_ERRORS)
   }
 
   function resetDraft(): void {
     setDraft(baseline)
     setErrors(EMPTY_ITEM_ERRORS)
+    setFormError(null)
     setDiscardModalOpen(false)
   }
 
-  function attemptDelete(): void {
+  async function attemptDelete(): Promise<void> {
     if (existingItem === undefined) return
-    deleteItem(existingItem.id)
-    show({ tone: 'success', message: 'Item deleted.' })
-    unsavedGuard.allowNextNavigation()
-    navigate('..', { replace: true })
+    setSaving(true)
+    try {
+      const result = await deleteItem(existingItem.id)
+      setDeleteModalOpen(false)
+      if (!result.ok) {
+        show({ tone: 'danger', message: result.message })
+        return
+      }
+      show({ tone: 'success', message: 'Item deleted.' })
+      unsavedGuard.allowNextNavigation()
+      navigate('..', { replace: true })
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -161,7 +209,12 @@ export function ItemEditorPage(): ReactElement {
             )}
           </Field>
 
-          <Field id="item-visitor-description" label="Visitor-facing description">
+          <Field
+            id="item-visitor-description"
+            label="Visitor-facing description"
+            required
+            {...(errors.shortDescription !== undefined ? { error: errors.shortDescription } : {})}
+          >
             {(control) => (
               <TextArea
                 {...control}
@@ -174,7 +227,12 @@ export function ItemEditorPage(): ReactElement {
             )}
           </Field>
 
-          <Field id="item-grounding-detail" label="Grounding detail">
+          <Field
+            id="item-grounding-detail"
+            label="Grounding detail"
+            required
+            {...(errors.detailText !== undefined ? { error: errors.detailText } : {})}
+          >
             {(control) => (
               <TextArea
                 {...control}
@@ -187,7 +245,12 @@ export function ItemEditorPage(): ReactElement {
             )}
           </Field>
 
-          <Field id="item-image-url" label="Image URL / upload placeholder">
+          <Field
+            id="item-image-url"
+            label="Image URL"
+            hint="Leave empty for no image."
+            {...(errors.imageUrl !== undefined ? { error: errors.imageUrl } : {})}
+          >
             {(control) => (
               <TextInput
                 {...control}
@@ -200,6 +263,13 @@ export function ItemEditorPage(): ReactElement {
             )}
           </Field>
         </div>
+
+        {formError !== null ? (
+          <StateBlock
+            size="inline"
+            state={{ kind: 'failure', title: 'Could not save this item', body: formError }}
+          />
+        ) : null}
 
         <section className={styles.mediaPanel} aria-label="Image preview">
           <h2 className="text-subtitle">Image preview</h2>
@@ -219,15 +289,21 @@ export function ItemEditorPage(): ReactElement {
       <div className={styles.stickySaveBar} role="region" aria-label="Item editor actions">
         <p className={`text-caption ${styles.dirtyText}`}>{dirty ? 'Unsaved changes' : 'All changes saved'}</p>
         <div className={styles.saveActions}>
-          <Button tone="secondary" onClick={() => (dirty ? setDiscardModalOpen(true) : resetDraft())}>
+          <Button
+            tone="secondary"
+            disabled={saving}
+            onClick={() => (dirty ? setDiscardModalOpen(true) : resetDraft())}
+          >
             Discard
           </Button>
           {!creating ? (
-            <Button tone="danger" onClick={() => setDeleteModalOpen(true)}>
+            <Button tone="danger" onClick={() => setDeleteModalOpen(true)} disabled={saving}>
               Delete item
             </Button>
           ) : null}
-          <Button onClick={commitSave}>Save item</Button>
+          <Button onClick={() => void commitSave()} disabled={saving}>
+            {saving ? 'Saving…' : 'Save item'}
+          </Button>
         </div>
       </div>
 
@@ -257,11 +333,11 @@ export function ItemEditorPage(): ReactElement {
         open={deleteModalOpen}
         title="Delete item?"
         entityName={existingItem?.name ?? 'Item'}
-        consequence="will be removed from this room."
+        consequence="will be permanently removed from this room."
         confirmLabel="Delete item"
         tone="danger"
         onCancel={() => setDeleteModalOpen(false)}
-        onConfirm={attemptDelete}
+        onConfirm={() => void attemptDelete()}
       />
     </div>
   )

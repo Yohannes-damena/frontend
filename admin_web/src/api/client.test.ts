@@ -152,7 +152,8 @@ describe('error handling', () => {
           message: 'Validation failed.',
           code: 'VALIDATION_ERROR',
           requestId: 'r2',
-          details: [{ field: 'slug', message: 'Slug must be lowercase.' }],
+          // The server names the offending key `path`, not `field`.
+          details: [{ path: 'slug', message: 'Slug must be lowercase.' }],
         },
       }),
     )

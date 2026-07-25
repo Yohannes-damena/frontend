@@ -1,35 +1,42 @@
-export type TeamMember = {
-  readonly id: string
-  readonly name: string
-  readonly email: string
-  readonly role: 'MUSEUM_ADMIN' | 'CURATOR' | 'EDITOR'
-  readonly accessSummary: string
-  readonly lastActive: string
-}
+import type { ApiAdminUser } from '../../api/types.ts'
 
-export const TEAM_MEMBERS: readonly TeamMember[] = [
+/**
+ * Demo seats, shaped exactly like the API's rows so the Team screen renders
+ * the same way with or without a backend. Only used when no API base URL is
+ * configured.
+ */
+export const DEMO_TEAM: readonly ApiAdminUser[] = [
   {
     id: 'tm-aster',
-    name: 'Aster Melesse',
     email: 'aster@adwa.local',
+    displayName: 'Aster Melesse',
     role: 'MUSEUM_ADMIN',
-    accessSummary: 'Museum settings, rooms, items, narration, team, activity',
-    lastActive: 'Today, 14:40',
+    status: 'ACTIVE',
+    museumId: 'adwa',
+    museumName: 'Adwa Memorial Museum',
+    lastLoginAt: '2026-07-25T14:40:00.000Z',
+    createdAt: '2026-01-12T09:00:00.000Z',
   },
   {
     id: 'tm-dawit',
-    name: 'Dawit Gebru',
     email: 'dawit.curator@adwa.local',
-    role: 'CURATOR',
-    accessSummary: 'Rooms, items, narration scripts',
-    lastActive: 'Today, 10:12',
+    displayName: 'Dawit Gebru',
+    role: 'MUSEUM_ADMIN',
+    status: 'ACTIVE',
+    museumId: 'adwa',
+    museumName: 'Adwa Memorial Museum',
+    lastLoginAt: '2026-07-25T10:12:00.000Z',
+    createdAt: '2026-02-03T09:00:00.000Z',
   },
   {
     id: 'tm-selam',
-    name: 'Selam Tadesse',
     email: 'selam.editor@adwa.local',
-    role: 'EDITOR',
-    accessSummary: 'Item metadata and media updates',
-    lastActive: 'Yesterday, 16:55',
+    displayName: 'Selam Tadesse',
+    role: 'MUSEUM_ADMIN',
+    status: 'INVITED',
+    museumId: 'adwa',
+    museumName: 'Adwa Memorial Museum',
+    lastLoginAt: null,
+    createdAt: '2026-07-20T09:00:00.000Z',
   },
 ] as const

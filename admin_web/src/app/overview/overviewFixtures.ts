@@ -1,304 +1,110 @@
-import type { KpiCardProps } from '../../kit/KpiCard/KpiCard.types.ts'
-import type { ChartSeries } from '../../kit/index.ts'
-import type { Provenance, StatusMarker, StatusTone } from '../../kit/types.ts'
+import type { StatusMarker, StatusTone } from '../../kit/types.ts'
+import type { ApiAuditEntry, ApiRoomReadiness, ApiTenantOverview } from '../../api/types.ts'
 
-export type RoomReadiness = {
-  readonly id: string
-  readonly order: number
-  readonly title: string
-  readonly narrationLabel: string
-  readonly narrationTone: StatusTone
-  readonly marker: StatusMarker
-  readonly updatedAt: string
-  readonly completion: string
+/**
+ * Demo data for the tenant overview, in exactly the shapes the API returns, so
+ * the page has one rendering path rather than two.
+ *
+ * The readiness vocabulary is the server's: a room is `ready` when it is
+ * narrated and has at least one item, `incomplete` when it is narrated but
+ * empty, and `empty` when there is no narration worth reading yet.
+ */
+
+/**
+ * Reachability outranks authoring state. A polished room the visitor route
+ * never reaches is worse than an unfinished one that is wired in, and it is
+ * invisible from the rooms list alone.
+ */
+export function roomMarker(room: ApiRoomReadiness): StatusMarker {
+  if (!room.inSequence) return 'cross'
+  if (room.readiness === 'ready') return 'dot'
+  if (room.readiness === 'incomplete') return 'ring'
+  return 'dash'
 }
 
-export type RecentChange = {
-  readonly id: string
-  readonly actor: string
-  readonly actorRole: 'museum_admin' | 'system_operator'
-  readonly action: string
-  readonly target: string
-  readonly when: string
-  readonly provenance: Provenance
+export function roomTone(room: ApiRoomReadiness): StatusTone {
+  if (!room.inSequence) return 'danger'
+  if (room.readiness === 'ready') return 'success'
+  if (room.readiness === 'incomplete') return 'warning'
+  return 'neutral'
 }
 
-export type MiniKpi = {
-  readonly label: string
-  readonly value: string | null
-  readonly provenance: Provenance
+export function roomStateLabel(room: ApiRoomReadiness): string {
+  if (!room.inSequence) return 'Unreachable'
+  if (room.readiness === 'ready') return 'Ready'
+  if (room.readiness === 'incomplete') return 'No items'
+  return 'No narration'
 }
 
-export type RankedRoom = {
-  readonly roomId: string
-  readonly label: string
-  readonly value: string
-  readonly provenance: Provenance
+/** Why the room is not ready, in the order an author would fix it. */
+export function roomBlockerText(room: ApiRoomReadiness): string {
+  const blockers: string[] = []
+  if (!room.inSequence) blockers.push('not reachable from the visitor route')
+  if (room.readiness === 'empty') blockers.push('narration is empty')
+  if (room.itemCount === 0) blockers.push('no items')
+  if (!room.hasAudio) blockers.push('no synthesised audio')
+  if (blockers.length === 0) return `${room.narrationChars} characters of narration, audio ready`
+  return `Needs: ${blockers.join(', ')}.`
 }
 
-export const OVERVIEW_MUSEUM_NAME = 'Adwa Victory Memorial'
+const DEMO_ROOMS: readonly ApiRoomReadiness[] = [
+  ['Road to Adwa', 'ready', 6, 1840, true, true],
+  ['Voices of Command', 'ready', 4, 1520, true, true],
+  ['March and Supply', 'incomplete', 0, 980, false, true],
+  ['Battlefront', 'ready', 8, 2210, true, true],
+  ['Regimental Histories', 'empty', 0, 0, false, true],
+  ['Foreign Correspondence', 'ready', 5, 1610, true, true],
+  ['Aftermath and Legacy', 'ready', 3, 1120, false, false],
+  ['Reflection Hall', 'ready', 2, 940, true, true],
+].map(([title, readiness, itemCount, narrationChars, hasAudio, inSequence], index) => ({
+  id: `demo-room-${index + 1}`,
+  storyOrder: index + 1,
+  title: title as string,
+  readiness: readiness as ApiRoomReadiness['readiness'],
+  itemCount: itemCount as number,
+  narrationChars: narrationChars as number,
+  hasAudio: hasAudio as boolean,
+  inSequence: inSequence as boolean,
+  updatedAt: new Date(Date.now() - (index + 1) * 7 * 60 * 60 * 1000).toISOString(),
+}))
 
-export const OVERVIEW_KPIS = [
-  {
-    label: 'Rooms with ready narration',
-    value: '9',
-    unit: '/ 14',
-    caption: 'Ready rooms in story sequence',
-    delta: { direction: 'up', label: '+2 since last editorial pass', tone: 'success' },
-    provenance: 'demo',
+export const DEMO_OVERVIEW: ApiTenantOverview = {
+  museumId: 'demo-museum',
+  museumName: 'Adwa Victory Memorial',
+  stats: {
+    roomCount: DEMO_ROOMS.length,
+    itemCount: DEMO_ROOMS.reduce((sum, room) => sum + room.itemCount, 0),
+    adminCount: 3,
+    roomsMissingNarration: DEMO_ROOMS.filter((room) => room.readiness === 'empty').length,
+    roomsWithoutItems: DEMO_ROOMS.filter((room) => room.itemCount === 0).length,
+    roomsReady: DEMO_ROOMS.filter((room) => room.readiness === 'ready').length,
+    roomsInSequence: DEMO_ROOMS.filter((room) => room.inSequence).length,
+    lastEditedAt: DEMO_ROOMS[0]?.updatedAt ?? null,
   },
-  {
-    label: 'Narration generation queue',
-    value: '3',
-    caption: 'Rooms waiting for regenerated audio',
-    delta: { direction: 'down', label: '1 fewer than yesterday', tone: 'success' },
-    provenance: 'demo',
-  },
-  {
-    label: 'Question answer success',
-    value: '91%',
-    caption: 'Mock verification set',
-    delta: { direction: 'up', label: '+4 points this week', tone: 'success' },
-    provenance: 'demo',
-  },
-  {
-    label: 'Completion rate (ticket scans)',
-    value: null,
-    caption: 'Visitor telemetry backend not connected yet.',
-    provenance: 'pending',
-  },
-] as const satisfies readonly KpiCardProps[]
+  rooms: DEMO_ROOMS,
+  tier: 'PRO',
+  subscriptionStatus: 'ACTIVE',
+  limits: { maxRooms: 10, maxItemsPerRoom: 25, maxAdminUsers: 5 },
+}
 
-export const OVERVIEW_ROOMS = [
-  {
-    id: 'road-to-adwa',
-    order: 1,
-    title: 'Road to Adwa',
-    narrationLabel: 'Ready',
-    narrationTone: 'success',
-    marker: 'dot',
-    updatedAt: 'Updated Jul 21',
-    completion: '98%',
-  },
-  {
-    id: 'voices-of-command',
-    order: 2,
-    title: 'Voices of Command',
-    narrationLabel: 'Ready',
-    narrationTone: 'success',
-    marker: 'dot',
-    updatedAt: 'Updated Jul 20',
-    completion: '95%',
-  },
-  {
-    id: 'march-and-supply',
-    order: 3,
-    title: 'March and Supply',
-    narrationLabel: 'Generating',
-    narrationTone: 'warning',
-    marker: 'ring',
-    updatedAt: 'Updated Jul 19',
-    completion: '72%',
-  },
-  {
-    id: 'battlefront',
-    order: 4,
-    title: 'Battlefront',
-    narrationLabel: 'Ready',
-    narrationTone: 'success',
-    marker: 'dot',
-    updatedAt: 'Updated Jul 22',
-    completion: '100%',
-  },
-  {
-    id: 'regimental-histories',
-    order: 5,
-    title: 'Regimental Histories',
-    narrationLabel: 'Not started',
-    narrationTone: 'neutral',
-    marker: 'dash',
-    updatedAt: 'Updated Jul 12',
-    completion: '0%',
-  },
-  {
-    id: 'foreign-correspondence',
-    order: 6,
-    title: 'Foreign Correspondence',
-    narrationLabel: 'Ready',
-    narrationTone: 'success',
-    marker: 'dot',
-    updatedAt: 'Updated Jul 18',
-    completion: '88%',
-  },
-  {
-    id: 'aftermath-and-legacy',
-    order: 7,
-    title: 'Aftermath and Legacy',
-    narrationLabel: 'Needs revision',
-    narrationTone: 'danger',
-    marker: 'cross',
-    updatedAt: 'Updated Jul 17',
-    completion: '41%',
-  },
-  {
-    id: 'global-press',
-    order: 8,
-    title: 'Global Press',
-    narrationLabel: 'Ready',
-    narrationTone: 'success',
-    marker: 'dot',
-    updatedAt: 'Updated Jul 19',
-    completion: '93%',
-  },
-  {
-    id: 'commander-biographies',
-    order: 9,
-    title: 'Commander Biographies',
-    narrationLabel: 'Generating',
-    narrationTone: 'warning',
-    marker: 'ring',
-    updatedAt: 'Updated Jul 21',
-    completion: '64%',
-  },
-  {
-    id: 'artifact-focus',
-    order: 10,
-    title: 'Artifact Focus',
-    narrationLabel: 'Ready',
-    narrationTone: 'success',
-    marker: 'dot',
-    updatedAt: 'Updated Jul 20',
-    completion: '90%',
-  },
-  {
-    id: 'memory-wall',
-    order: 11,
-    title: 'Memory Wall',
-    narrationLabel: 'Not started',
-    narrationTone: 'neutral',
-    marker: 'dash',
-    updatedAt: 'Updated Jul 10',
-    completion: '0%',
-  },
-  {
-    id: 'diaspora-voices',
-    order: 12,
-    title: 'Diaspora Voices',
-    narrationLabel: 'Ready',
-    narrationTone: 'success',
-    marker: 'dot',
-    updatedAt: 'Updated Jul 16',
-    completion: '86%',
-  },
-  {
-    id: 'conservation-lab',
-    order: 13,
-    title: 'Conservation Lab',
-    narrationLabel: 'Ready',
-    narrationTone: 'success',
-    marker: 'dot',
-    updatedAt: 'Updated Jul 22',
-    completion: '97%',
-  },
-  {
-    id: 'reflection-hall',
-    order: 14,
-    title: 'Reflection Hall',
-    narrationLabel: 'Ready',
-    narrationTone: 'success',
-    marker: 'dot',
-    updatedAt: 'Updated Jul 20',
-    completion: '92%',
-  },
-] as const satisfies readonly RoomReadiness[]
-
-export const OVERVIEW_CHART_CATEGORIES = OVERVIEW_ROOMS.map((room) => `${room.order}`)
-
-export const VISIT_VOLUME_SERIES = [
-  {
-    id: 'weekday-visits',
-    label: 'Weekday visits',
-    role: 'primary',
-    values: [182, 201, 149, 234, 96, 141, 118, 173, 127, 156, 80, 132, 104, 111],
-  },
-  {
-    id: 'weekend-visits',
-    label: 'Weekend visits',
-    role: 'comparison',
-    values: [231, 247, 198, 282, 122, 188, 160, 214, 169, 201, 116, 167, 138, 149],
-  },
-  {
-    id: 'guided-groups',
-    label: 'Guided groups',
-    role: 'comparison',
-    values: [19, 24, 16, 31, 8, 15, 11, 21, 12, 17, 5, 14, 9, 10],
-  },
-] as const satisfies readonly ChartSeries[]
-
-export const ENGAGEMENT_VALUE_SERIES = [
-  {
-    id: 'avg-dwell-minutes',
-    label: 'Avg dwell minutes',
-    role: 'primary',
-    values: [7.8, 8.4, 6.9, 9.1, 4.3, 6.1, 5.4, 7.2, 5.8, 6.5, 3.6, 5.1, 4.7, 5.9],
-  },
-  {
-    id: 'completion-share',
-    label: 'Completion share (%)',
-    role: 'comparison',
-    values: [98, 95, 72, 100, 0, 88, 41, 93, 64, 90, 0, 86, 97, 92],
-  },
-] as const satisfies readonly ChartSeries[]
-
-export const OVERVIEW_RECENT_CHANGES = [
-  {
-    id: 'change-1',
-    actor: 'Aster M.',
-    actorRole: 'museum_admin',
-    action: 'Published narration',
-    target: 'Room 04 - Battlefront',
-    when: '2 hours ago',
-    provenance: 'demo',
-  },
-  {
-    id: 'change-2',
-    actor: 'operator@adwa.local',
-    actorRole: 'system_operator',
-    action: 'Queued regeneration (scoped support)',
-    target: 'Room 09 - Commander Biographies',
-    when: '5 hours ago',
-    provenance: 'demo',
-  },
-  {
-    id: 'change-3',
-    actor: 'Dawit G.',
-    actorRole: 'museum_admin',
-    action: 'Reordered room',
-    target: 'Room 06 - Foreign Correspondence',
-    when: 'Yesterday',
-    provenance: 'demo',
-  },
-  {
-    id: 'change-4',
-    actor: 'operator@adwa.local',
-    actorRole: 'system_operator',
-    action: 'Updated script (scoped support)',
-    target: 'Room 07 - Aftermath and Legacy',
-    when: 'Yesterday',
-    provenance: 'demo',
-  },
-] as const satisfies readonly RecentChange[]
-
-export const INSIGHTS_MINI_KPIS = [
-  { label: 'Ready', value: '9', provenance: 'demo' },
-  { label: 'Generating', value: '2', provenance: 'demo' },
-  { label: 'Needs revision', value: '1', provenance: 'demo' },
-  { label: 'Not started', value: '2', provenance: 'demo' },
-] as const satisfies readonly MiniKpi[]
-
-export const TOP_ROOMS_BY_VISITS = [
-  { roomId: 'battlefront', label: 'Battlefront', value: '516 visits', provenance: 'demo' },
-  { roomId: 'voices-of-command', label: 'Voices of Command', value: '448 visits', provenance: 'demo' },
-  { roomId: 'road-to-adwa', label: 'Road to Adwa', value: '413 visits', provenance: 'demo' },
-  { roomId: 'global-press', label: 'Global Press', value: '387 visits', provenance: 'demo' },
-] as const satisfies readonly RankedRoom[]
+export const DEMO_RECENT_CHANGES: readonly ApiAuditEntry[] = [
+  ['UPDATE', 'Room', 'Battlefront', 'aster@adwa.local', 'Aster Melesse', 'MUSEUM_ADMIN', 2],
+  ['UPDATE', 'Room', 'March and Supply', 'operator@adwa.local', null, 'SYSTEM_ADMIN', 5],
+  ['CREATE', 'Item', 'Formation Sketch', 'aster@adwa.local', 'Aster Melesse', 'MUSEUM_ADMIN', 27],
+  ['UPDATE', 'Museum', 'Adwa Victory Memorial', 'aster@adwa.local', 'Aster Melesse', 'MUSEUM_ADMIN', 30],
+].map(([action, entityType, label, email, displayName, role, hoursAgo], index) => ({
+  id: `demo-audit-${index + 1}`,
+  action: action as ApiAuditEntry['action'],
+  entityType: entityType as string,
+  entityId: `demo-entity-${index + 1}`,
+  entityLabel: label as string,
+  museumId: 'demo-museum',
+  museumName: 'Adwa Victory Memorial',
+  actorId: `demo-actor-${index + 1}`,
+  actorEmail: email as string,
+  actorDisplayName: displayName as string | null,
+  actorRole: role as ApiAuditEntry['actorRole'],
+  before: null,
+  after: { title: label },
+  createdAt: new Date(Date.now() - (hoursAgo as number) * 60 * 60 * 1000).toISOString(),
+}))

@@ -1,7 +1,7 @@
 import type { ReactElement, ReactNode } from 'react'
 import { NavLink, useParams } from 'react-router-dom'
 
-import { Panel } from '../../kit/index.ts'
+import { Panel, StateBlock, type KitState } from '../../kit/index.ts'
 import styles from './TenantSettingsLayout.module.css'
 
 type SettingsSection = 'museum' | 'gate' | 'guide' | 'voice'
@@ -10,6 +10,10 @@ type SettingsLayoutProps = {
   readonly section: SettingsSection
   readonly title: string
   readonly description: string
+  /** Passed down by the page, which already holds the store — saves a second fetch. */
+  readonly museumName: string
+  /** Replaces the form while the museum is loading or unreachable. */
+  readonly state?: KitState
   readonly children: ReactNode
 }
 
@@ -29,6 +33,8 @@ export function TenantSettingsLayout({
   section,
   title,
   description,
+  museumName,
+  state,
   children,
 }: SettingsLayoutProps): ReactElement {
   const { museumId } = useParams()
@@ -38,7 +44,7 @@ export function TenantSettingsLayout({
     <div className={styles.page}>
       <header className={styles.headerCard}>
         <div>
-          <p className="museum-name">Adwa Memorial Museum</p>
+          <p className="museum-name">{museumName}</p>
           <h1 className="text-title">Settings</h1>
           <p className={`text-body ${styles.muted}`}>
             Inner settings rail for tenant-scoped museum configuration.
@@ -73,7 +79,11 @@ export function TenantSettingsLayout({
 
         <Panel title={title} description={description}>
           <div className={styles.formPanel} data-settings-section={section}>
-            {children}
+            {state !== undefined && state.kind !== 'ready' ? (
+              <StateBlock state={state} size="region" />
+            ) : (
+              children
+            )}
           </div>
         </Panel>
       </section>
