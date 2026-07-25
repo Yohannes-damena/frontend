@@ -61,3 +61,6 @@ coverage/
 .env.*
 !.env.example
 Adwa_backend_implementation.md
+
+# Stitch HTML exports (source reference only)
+stitch_museum_guide_home/
