@@ -3,51 +3,96 @@
 *.log
 *.pyc
 *.swp
+*.bak
+*.tmp
+*~
 .DS_Store
 .atom/
 .buildlog/
 .history
 .svn/
-*.bak
-*.tmp
-*~
 
-# IntelliJ related
+# User-specific / IDE stuff
+.idea/
+.vscode/
 *.iml
 *.ipr
 *.iws
-.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
-# The .vscode folder contains configuration for the Visual Studio Code editor
-.vscode/
-
-# The .dart_tool folder contains tools used by Dart
+# Flutter / Dart
 .dart_tool/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
 .flutter-plugins
 .flutter-plugins-dependencies
+.packages
 .pub-cache/
 .pub/
 /build/
 **/build/
-
-# Web related
+flutter_*.png
+**/doc/api/
 lib/generated_plugin_registrant.dart
 
-# Symbolication related
+# Symbolication / obfuscation related
 app.*.symbols
-
-# Obfuscation related
 app.*.map.json
+*.js.deps
+*.js.map
+*.snapshot
+
+# Android
+.gradle/
+local.properties
+**/android/app/debug
+**/android/app/profile
+**/android/app/release
+
+# iOS / macOS
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/app.flt
+**/ios/Runner/GeneratedPluginRegistrant.h
+**/ios/Runner/GeneratedPluginRegistrant.m
+**/ios/Runner.xcodeproj/project.xcworkspace
+**/ios/Runner.xcworkspace
+**/Pods/
+**/Podfile.lock
+
+# Coverage
+coverage/
+
+# Environment / secret files
+.env
+.env.*
+!.env.example
+
+# Admin web (Vite / Node) build artifacts
+admin_web/dist/
+admin_web/dist-ssr/
+admin_web/*.local
+admin_web/.vite/
 
 # Dependencies
 node_modules/
 
+# TypeScript build info
+*.tsbuildinfo
+
+# Stitch HTML exports (source reference only, lives under mobile/)
+stitch_museum_guide_home/
+
+# API contract, kept local. The backend repository owns it; this is a working
+# copy. src/api/contract.test.ts runs against it when present and skips when not.
+postman/
+
 # OS generated files
-.DS_Store
 .DS_Store?
 ._*
 .Spotlight-V100
@@ -55,5 +100,7 @@ node_modules/
 ehthumbs.db
 Thumbs.db
 
-# Documentation and design notes are kept out of the repository.
+# Documentation and design notes are kept out of the repository. All README
+# and planning/design docs are consolidated under readme/ (not committed).
 *.md
+/readme/
