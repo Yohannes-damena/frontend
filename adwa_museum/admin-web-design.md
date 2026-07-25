@@ -65,7 +65,8 @@ Three rules follow, and they are non-negotiable across every phase:
 ### Route map
 
 ```text
-/sign-in                                  routes by role after auth
+/sign-in                                  museum door, MUSEUM_ADMIN only
+/sign-out
 
 /app                                      tenant plane
 /app/overview
@@ -82,6 +83,9 @@ Three rules follow, and they are non-negotiable across every phase:
 /app/settings/guide
 /app/settings/voice
 
+/operator/sign-in                         operator door, SYSTEM_ADMIN only
+/operator/sign-out
+
 /operator                                 control plane, SYSTEM_ADMIN only
 /operator/fleet
 /operator/fleet/new
@@ -94,7 +98,9 @@ Three rules follow, and they are non-negotiable across every phase:
 /operator/tenant/:museumId/*              scoped-in: tenant plane under operator identity
 ```
 
-Sign-in routes by role: `MUSEUM_ADMIN` lands on `/app/overview`, `SYSTEM_ADMIN` lands on `/operator/fleet`. A museum administrator hitting any `/operator` route receives a not-found, not an unauthorized page, so the control plane's existence is not disclosed.
+Each plane has its own door. `/sign-in` accepts only `MUSEUM_ADMIN` and lands on `/app/overview`; `/operator/sign-in` accepts only `SYSTEM_ADMIN` and lands on `/operator/fleet`. Neither door offers a role picker, and every rejected attempt returns one generic message so a wrong role is indistinguishable from a wrong password.
+
+A museum administrator hitting any `/operator` route — including `/operator/sign-in` — receives a not-found, not an unauthorized page, so the control plane's existence is not disclosed. The museum door therefore never links to the operator door; the operator door does link back, since an operator already knows both planes exist. Signing out or being bounced by the auth guard returns you to the door for your own plane rather than a shared one.
 
 ## 4. App Shell and Layout
 

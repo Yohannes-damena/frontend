@@ -63,6 +63,23 @@
   color: var(--feedback-danger);
 }
 
+.signInAltDoor {
+  justify-self: start;
+  color: var(--content-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+.signInAltDoor:hover {
+  color: var(--content-primary);
+}
+
+.signInAltDoor:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
 .tenantShellFrame {
   min-height: 100vh;
   display: flex;

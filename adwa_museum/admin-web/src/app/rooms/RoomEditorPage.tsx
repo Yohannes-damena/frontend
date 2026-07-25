@@ -91,6 +91,7 @@ export function RoomEditorPage({ mode }: { readonly mode: RoomEditorMode }): Rea
         return
       }
       show({ tone: 'success', message: 'Room created.' })
+      unsavedGuard.allowNextNavigation()
       navigate(`../${created.roomId}`, { replace: true })
       return
     }
@@ -122,6 +123,7 @@ export function RoomEditorPage({ mode }: { readonly mode: RoomEditorMode }): Rea
     if (mode !== 'edit' || room === undefined) return
     deleteRoom(room.id)
     show({ tone: 'success', message: 'Room deleted.' })
+    unsavedGuard.allowNextNavigation()
     navigate('..', { replace: true })
   }
 
