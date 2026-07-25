@@ -16,7 +16,7 @@ export type RoomRecord = {
   readonly museumId: string
   readonly title: string
   readonly storyOrder: number
-  readonly overviewText: string
+  readonly roomOverviewText: string
   readonly narrationScript: string
   readonly nextRoomId: string | null
   readonly narrationStatus: NarrationStatus
@@ -28,8 +28,8 @@ export type ItemRecord = {
   readonly museumId: string
   readonly roomId: string
   readonly name: string
-  readonly visitorDescription: string
-  readonly groundingDetail: string
+  readonly shortDescription: string
+  readonly detailText: string
   readonly imageUrl: string
   readonly displayOrder: number
   readonly lastEditedAt: string
@@ -38,15 +38,15 @@ export type ItemRecord = {
 export type RoomDraft = {
   readonly title: string
   readonly storyOrder: string
-  readonly overviewText: string
+  readonly roomOverviewText: string
   readonly narrationScript: string
   readonly nextRoomId: string
 }
 
 export type ItemDraft = {
   readonly name: string
-  readonly visitorDescription: string
-  readonly groundingDetail: string
+  readonly shortDescription: string
+  readonly detailText: string
   readonly imageUrl: string
   readonly displayOrder: string
 }
@@ -100,7 +100,7 @@ const BASE_ROOMS: readonly Omit<RoomRecord, 'museumId'>[] = [
     id: 'r-beginning',
     title: 'Origins of Adwa',
     storyOrder: 1,
-    overviewText:
+    roomOverviewText:
       'Introduces the historic context before the campaign and sets grounding context for AI guide prompts.',
     narrationScript:
       'Welcome to the opening room. We begin by tracing the political and social conditions that shaped Adwa.',
@@ -112,7 +112,7 @@ const BASE_ROOMS: readonly Omit<RoomRecord, 'museumId'>[] = [
     id: 'r-mobilization',
     title: 'Mobilization and Strategy',
     storyOrder: 2,
-    overviewText:
+    roomOverviewText:
       'Covers force assembly, supply corridors, and the strategic decisions that positioned the Ethiopian coalition.',
     narrationScript:
       'In this room, visitors encounter the planning phase: logistics, alliances, and strategic geography.',
@@ -124,7 +124,7 @@ const BASE_ROOMS: readonly Omit<RoomRecord, 'museumId'>[] = [
     id: 'r-battlefield',
     title: 'Battlefield at Adwa',
     storyOrder: 3,
-    overviewText:
+    roomOverviewText:
       'Primary encounter room. Grounding notes include timeline anchors and unit movement context.',
     narrationScript: 'Pending script refinement for voice cadence and historical cross-check.',
     nextRoomId: 'r-legacy',
@@ -135,7 +135,7 @@ const BASE_ROOMS: readonly Omit<RoomRecord, 'museumId'>[] = [
     id: 'r-legacy',
     title: 'Legacy and Memory',
     storyOrder: 4,
-    overviewText:
+    roomOverviewText:
       'Explains long-tail effects of Adwa in regional politics and collective memory narratives.',
     narrationScript: '',
     nextRoomId: null,
@@ -149,8 +149,8 @@ const BASE_ITEMS: readonly Omit<ItemRecord, 'museumId'>[] = [
     id: 'i-map-1896',
     roomId: 'r-beginning',
     name: 'Horn of Africa Map, 1896',
-    visitorDescription: 'Annotated map showing political boundaries before the campaign.',
-    groundingDetail: 'Used by guide model for place-name disambiguation and pre-war geography context.',
+    shortDescription: 'Annotated map showing political boundaries before the campaign.',
+    detailText: 'Used by guide model for place-name disambiguation and pre-war geography context.',
     imageUrl: 'https://images.unsplash.com/photo-1461360370896-922624d12aa1?auto=format&w=1200',
     displayOrder: 1,
     lastEditedAt: '2026-07-24T14:36:00.000Z',
@@ -159,8 +159,8 @@ const BASE_ITEMS: readonly Omit<ItemRecord, 'museumId'>[] = [
     id: 'i-royal-letter',
     roomId: 'r-beginning',
     name: 'Royal Correspondence Excerpt',
-    visitorDescription: 'Diplomatic letter excerpt highlighting shifting alliances.',
-    groundingDetail: 'Used as citation source for pre-battle diplomatic narrative.',
+    shortDescription: 'Diplomatic letter excerpt highlighting shifting alliances.',
+    detailText: 'Used as citation source for pre-battle diplomatic narrative.',
     imageUrl: 'https://images.unsplash.com/photo-1455390582262-044cdead277a?auto=format&w=1200',
     displayOrder: 2,
     lastEditedAt: '2026-07-24T14:39:00.000Z',
@@ -169,8 +169,8 @@ const BASE_ITEMS: readonly Omit<ItemRecord, 'museumId'>[] = [
     id: 'i-supply-ledger',
     roomId: 'r-mobilization',
     name: 'Supply Ledger',
-    visitorDescription: 'Ledger tracing grain and ammunition movement across routes.',
-    groundingDetail: 'Supports timeline sections about logistics and constraints.',
+    shortDescription: 'Ledger tracing grain and ammunition movement across routes.',
+    detailText: 'Supports timeline sections about logistics and constraints.',
     imageUrl: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?auto=format&w=1200',
     displayOrder: 1,
     lastEditedAt: '2026-07-24T16:22:00.000Z',
@@ -179,8 +179,8 @@ const BASE_ITEMS: readonly Omit<ItemRecord, 'museumId'>[] = [
     id: 'i-formation-sketch',
     roomId: 'r-battlefield',
     name: 'Formation Sketch',
-    visitorDescription: 'Field sketch of troop positions at first engagement.',
-    groundingDetail: 'Grounding for sequence of tactical descriptions in narration.',
+    shortDescription: 'Field sketch of troop positions at first engagement.',
+    detailText: 'Grounding for sequence of tactical descriptions in narration.',
     imageUrl: 'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&w=1200',
     displayOrder: 1,
     lastEditedAt: '2026-07-25T09:58:00.000Z',
@@ -189,8 +189,8 @@ const BASE_ITEMS: readonly Omit<ItemRecord, 'museumId'>[] = [
     id: 'i-commemorative-plaque',
     roomId: 'r-legacy',
     name: 'Commemorative Plaque',
-    visitorDescription: 'Modern plaque commemorating the battle and its symbolism.',
-    groundingDetail: 'Used for interpretation layer around memory and public history.',
+    shortDescription: 'Modern plaque commemorating the battle and its symbolism.',
+    detailText: 'Used for interpretation layer around memory and public history.',
     imageUrl: 'https://images.unsplash.com/photo-1473186578172-c141e6798cf4?auto=format&w=1200',
     displayOrder: 1,
     lastEditedAt: '2026-07-25T10:21:00.000Z',
@@ -315,7 +315,7 @@ function validateRoomDraftAgainst(
       museumId,
       title,
       storyOrder,
-      overviewText: draft.overviewText,
+      roomOverviewText: draft.roomOverviewText,
       narrationScript: draft.narrationScript,
       nextRoomId,
       narrationStatus: editingRoomId === null ? 'not_started' : museumRooms[0]?.narrationStatus ?? 'not_started',
@@ -392,7 +392,7 @@ export function toRoomDraft(room: RoomRecord): RoomDraft {
   return {
     title: room.title,
     storyOrder: String(room.storyOrder),
-    overviewText: room.overviewText,
+    roomOverviewText: room.roomOverviewText,
     narrationScript: room.narrationScript,
     nextRoomId: room.nextRoomId ?? '',
   }
@@ -401,8 +401,8 @@ export function toRoomDraft(room: RoomRecord): RoomDraft {
 export function toItemDraft(item: ItemRecord): ItemDraft {
   return {
     name: item.name,
-    visitorDescription: item.visitorDescription,
-    groundingDetail: item.groundingDetail,
+    shortDescription: item.shortDescription,
+    detailText: item.detailText,
     imageUrl: item.imageUrl,
     displayOrder: String(item.displayOrder),
   }
@@ -411,15 +411,15 @@ export function toItemDraft(item: ItemRecord): ItemDraft {
 const EMPTY_ROOM_DRAFT: RoomDraft = {
   title: '',
   storyOrder: '',
-  overviewText: '',
+  roomOverviewText: '',
   narrationScript: '',
   nextRoomId: '',
 }
 
 const EMPTY_ITEM_DRAFT: ItemDraft = {
   name: '',
-  visitorDescription: '',
-  groundingDetail: '',
+  shortDescription: '',
+  detailText: '',
   imageUrl: '',
   displayOrder: '',
 }
@@ -484,7 +484,7 @@ export function AuthoringStoreProvider({
               museumId: resolvedMuseumId,
               title: draft.title.trim(),
               storyOrder,
-              overviewText: draft.overviewText.trim(),
+              roomOverviewText: draft.roomOverviewText.trim(),
               narrationScript: draft.narrationScript.trim(),
               nextRoomId: draft.nextRoomId.trim().length > 0 ? draft.nextRoomId : null,
               narrationStatus: 'not_started',
@@ -506,7 +506,7 @@ export function AuthoringStoreProvider({
                   ...room,
                   title: draft.title.trim(),
                   storyOrder,
-                  overviewText: draft.overviewText.trim(),
+                  roomOverviewText: draft.roomOverviewText.trim(),
                   narrationScript: draft.narrationScript.trim(),
                   nextRoomId: draft.nextRoomId.trim().length > 0 ? draft.nextRoomId : null,
                   lastEditedAt: nowIso(),
@@ -537,8 +537,8 @@ export function AuthoringStoreProvider({
               museumId: resolvedMuseumId,
               roomId,
               name: draft.name.trim(),
-              visitorDescription: draft.visitorDescription.trim(),
-              groundingDetail: draft.groundingDetail.trim(),
+              shortDescription: draft.shortDescription.trim(),
+              detailText: draft.detailText.trim(),
               imageUrl: draft.imageUrl.trim(),
               displayOrder,
               lastEditedAt: nowIso(),
@@ -559,8 +559,8 @@ export function AuthoringStoreProvider({
                   ...item,
                   roomId,
                   name: draft.name.trim(),
-                  visitorDescription: draft.visitorDescription.trim(),
-                  groundingDetail: draft.groundingDetail.trim(),
+                  shortDescription: draft.shortDescription.trim(),
+                  detailText: draft.detailText.trim(),
                   imageUrl: draft.imageUrl.trim(),
                   displayOrder,
                   lastEditedAt: nowIso(),

@@ -75,7 +75,7 @@ export function RoomItemsListPage(): ReactElement {
     rowKey: (item) => item.id,
     columns,
     pageSize: 8,
-    searchFields: [(item) => item.name, (item) => item.visitorDescription, (item) => item.groundingDetail],
+    searchFields: [(item) => item.name, (item) => item.shortDescription, (item) => item.detailText],
     initialSort: { columnId: 'displayOrder', direction: 'ascending' },
   })
 

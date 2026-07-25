@@ -91,7 +91,7 @@ export function RoomsListPage(): ReactElement {
     rowKey: (room) => room.id,
     columns,
     pageSize: 8,
-    searchFields: [(room) => room.title, (room) => room.overviewText],
+    searchFields: [(room) => room.title, (room) => room.roomOverviewText],
     initialSort: { columnId: 'storyOrder', direction: 'ascending' },
   })
 

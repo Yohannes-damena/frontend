@@ -165,8 +165,8 @@ export function ItemEditorPage(): ReactElement {
             {(control) => (
               <TextArea
                 {...control}
-                value={draft.visitorDescription}
-                onChange={(value) => setField('visitorDescription', value)}
+                value={draft.shortDescription}
+                onChange={(value) => setField('shortDescription', value)}
                 rows={4}
                 maxLength={700}
                 showCount
@@ -178,8 +178,8 @@ export function ItemEditorPage(): ReactElement {
             {(control) => (
               <TextArea
                 {...control}
-                value={draft.groundingDetail}
-                onChange={(value) => setField('groundingDetail', value)}
+                value={draft.detailText}
+                onChange={(value) => setField('detailText', value)}
                 rows={4}
                 maxLength={1200}
                 showCount

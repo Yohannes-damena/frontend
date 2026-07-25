@@ -197,8 +197,8 @@ export function RoomEditorPage({ mode }: { readonly mode: RoomEditorMode }): Rea
             {(control) => (
               <TextArea
                 {...control}
-                value={draft.overviewText}
-                onChange={(value) => setField('overviewText', value)}
+                value={draft.roomOverviewText}
+                onChange={(value) => setField('roomOverviewText', value)}
                 rows={5}
                 maxLength={700}
                 showCount

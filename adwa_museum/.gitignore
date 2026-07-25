@@ -73,3 +73,10 @@ admin-web/.vite/
 
 # Stitch HTML exports (source reference only)
 stitch_museum_guide_home/
+
+# API contract, kept local. The backend repository owns it; this is a working
+# copy. src/api/contract.test.ts runs against it when present and skips when not.
+postman/
+
+# Documentation and design notes are kept out of the repository.
+*.md
