@@ -54,3 +54,6 @@ node_modules/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Documentation and design notes are kept out of the repository.
+*.md

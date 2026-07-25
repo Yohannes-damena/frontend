@@ -25,8 +25,13 @@ import {
   useRouteError,
 } from 'react-router-dom'
 
+import { signIn as apiSignIn } from './api/adminApi.ts'
+import { setAuthToken } from './api/client.ts'
+import { isLiveApi } from './api/config.ts'
+import { isApiError, messageForCode } from './api/errors.ts'
 import { Button, Field, TextInput, ToastProvider } from './kit/index.ts'
 import { ItemEditorPage } from './app/items/ItemEditorPage.tsx'
+import { LandingPage } from './app/landing/LandingPage.tsx'
 import { RoomItemsListPage } from './app/items/RoomItemsListPage.tsx'
 import { NarrationPage } from './app/narration/NarrationPage.tsx'
 import { ActivityPage } from './app/activity/ActivityPage.tsx'
@@ -55,6 +60,11 @@ type Role = 'MUSEUM_ADMIN' | 'SYSTEM_ADMIN'
 type Session = {
   readonly email: string
   readonly role: Role
+  /** Null for a system admin, who belongs to no museum. */
+  readonly museumId: string | null
+  /** Null in demo mode, when no API base URL is configured. */
+  readonly token: string | null
+  readonly expiresAt: string | null
 }
 
 type SignInInput = {
@@ -63,9 +73,20 @@ type SignInInput = {
   readonly role: Role
 }
 
+/**
+ * `credentials` covers anything that must stay indistinguishable — a wrong
+ * password, an unknown email, or the right account at the wrong door. `service`
+ * is a problem with the connection itself, which is safe to describe plainly.
+ */
+type SignInFailure = {
+  readonly ok: false
+  readonly kind: 'credentials' | 'service'
+  readonly message: string
+}
+
 type AuthContextValue = {
   readonly session: Session | null
-  readonly signIn: (input: SignInInput) => { ok: true } | { ok: false; message: string }
+  readonly signIn: (input: SignInInput) => Promise<{ ok: true } | SignInFailure>
   readonly signOut: () => void
 }
 
@@ -94,7 +115,8 @@ type NavItemConfig = {
 
 type ViewportMode = 'wide' | 'desktop' | 'drawer'
 
-const SESSION_KEY = 'adwa.admin.phase3.session'
+/** Bumped from the phase3 key: a stored mock session cannot satisfy the token-bearing shape. */
+const SESSION_KEY = 'adwa.admin.session.v2'
 const SIDEBAR_KEY_PREFIX = 'adwa.admin.phase3.sidebar'
 const DEMO_PASSWORD = 'demo123'
 
@@ -195,22 +217,48 @@ function formatRole(role: Role): string {
   return role === 'SYSTEM_ADMIN' ? 'system administrator' : 'museum administrator'
 }
 
+function hasExpired(expiresAt: string | null): boolean {
+  if (expiresAt === null) return false
+  const at = new Date(expiresAt).getTime()
+  return Number.isFinite(at) && at <= Date.now()
+}
+
+function writeSession(session: Session): void {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(SESSION_KEY, JSON.stringify(session))
+}
+
+/**
+ * Reads the stored session, dropping it if the token has already expired so the
+ * app returns to the door instead of firing requests that cannot succeed.
+ */
 function readSession(): Session | null {
   if (typeof window === 'undefined') return null
   const raw = window.localStorage.getItem(SESSION_KEY)
   if (raw === null) return null
+
   try {
-    const parsed = JSON.parse(raw) as { email?: unknown; role?: unknown }
-    if (
-      typeof parsed.email === 'string' &&
-      (parsed.role === 'MUSEUM_ADMIN' || parsed.role === 'SYSTEM_ADMIN')
-    ) {
-      return { email: parsed.email, role: parsed.role }
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const role = parsed.role
+    if (typeof parsed.email !== 'string') return null
+    if (role !== 'MUSEUM_ADMIN' && role !== 'SYSTEM_ADMIN') return null
+
+    const expiresAt = typeof parsed.expiresAt === 'string' ? parsed.expiresAt : null
+    if (hasExpired(expiresAt)) {
+      window.localStorage.removeItem(SESSION_KEY)
+      return null
+    }
+
+    return {
+      email: parsed.email,
+      role,
+      museumId: typeof parsed.museumId === 'string' ? parsed.museumId : null,
+      token: typeof parsed.token === 'string' ? parsed.token : null,
+      expiresAt,
     }
   } catch {
     return null
   }
-  return null
 }
 
 function readSidebarPreference(session: Session | null): boolean | null {
@@ -254,26 +302,84 @@ function useViewportMode(): ViewportMode {
   return mode
 }
 
+/** Any credential failure reads the same, so no attempt reveals what was wrong. */
+const CREDENTIAL_FAILURE: SignInFailure = {
+  ok: false,
+  kind: 'credentials',
+  message: 'Those credentials are not valid.',
+}
+
 function AuthProvider({ children }: { children: ReactNode }): ReactElement {
-  const [session, setSession] = useState<Session | null>(() => readSession())
+  const [session, setSession] = useState<Session | null>(() => {
+    const restored = readSession()
+    setAuthToken(restored?.token ?? null)
+    return restored
+  })
+
+  useEffect(() => {
+    setAuthToken(session?.token ?? null)
+  }, [session])
 
   const value = useMemo<AuthContextValue>(
     () => ({
       session,
-      signIn: ({ email, password, role }) => {
+      signIn: async ({ email, password, role }) => {
         const normalizedEmail = email.trim().toLowerCase()
-        const account = DEMO_ACCOUNTS.find((candidate) => candidate.email === normalizedEmail)
-        if (password !== DEMO_PASSWORD || account === undefined || account.role !== role) {
-          return { ok: false, message: 'Invalid credentials for the selected role.' }
+
+        if (!isLiveApi) {
+          const account = DEMO_ACCOUNTS.find((candidate) => candidate.email === normalizedEmail)
+          if (password !== DEMO_PASSWORD || account === undefined || account.role !== role) {
+            return CREDENTIAL_FAILURE
+          }
+          const next: Session = {
+            email: normalizedEmail,
+            role,
+            museumId: null,
+            token: null,
+            expiresAt: null,
+          }
+          writeSession(next)
+          setSession(next)
+          return { ok: true }
         }
-        const next: Session = { email: normalizedEmail, role }
-        setSession(next)
-        if (typeof window !== 'undefined') {
-          window.localStorage.setItem(SESSION_KEY, JSON.stringify(next))
+
+        try {
+          const response = await apiSignIn({ email: normalizedEmail, password })
+
+          /**
+           * The server decides the role; the door only decides which surface was
+           * used. A valid operator arriving at the museum door is refused with
+           * the same message as a bad password, because saying "wrong door"
+           * would disclose that the other plane exists.
+           */
+          if (response.role !== role) return CREDENTIAL_FAILURE
+
+          const next: Session = {
+            email: normalizedEmail,
+            role: response.role,
+            museumId: response.museumId,
+            token: response.token,
+            expiresAt: response.expiresAt,
+          }
+          setAuthToken(response.token)
+          writeSession(next)
+          setSession(next)
+          return { ok: true }
+        } catch (error) {
+          // A rate limit or an unreachable server is not a hint about the account.
+          if (
+            isApiError(error) &&
+            (error.code === 'RATE_LIMITED' ||
+              error.code === 'NETWORK_ERROR' ||
+              error.code === 'TIMEOUT')
+          ) {
+            return { ok: false, kind: 'service', message: messageForCode(error) }
+          }
+          return CREDENTIAL_FAILURE
         }
-        return { ok: true }
       },
       signOut: () => {
+        setAuthToken(null)
         setSession(null)
         if (typeof window !== 'undefined') {
           window.localStorage.removeItem(SESSION_KEY)
@@ -351,7 +457,7 @@ const appRouter = createBrowserRouter(
 
 function RootRoute(): ReactElement {
   const { session } = useAuth()
-  if (session === null) return <Navigate to={MUSEUM_SIGN_IN_PATH} replace />
+  if (session === null) return <LandingPage />
   return <Navigate to={getLandingPath(session.role)} replace />
 }
 
@@ -419,9 +525,11 @@ function SignInPanel({ surface }: { surface: SignInSurface }): ReactElement {
   const { session, signIn, signOut } = useAuth()
   const navigate = useNavigate()
 
-  const [email, setEmail] = useState<string>(() => getDemoEmail(surface.role))
-  const [password, setPassword] = useState(DEMO_PASSWORD)
+  // Only prefill in demo mode; against a real API these would be misleading.
+  const [email, setEmail] = useState<string>(() => (isLiveApi ? '' : getDemoEmail(surface.role)))
+  const [password, setPassword] = useState(isLiveApi ? '' : DEMO_PASSWORD)
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
   const header = (
     <div className={styles.signInTitleRow}>
@@ -456,19 +564,31 @@ function SignInPanel({ surface }: { surface: SignInSurface }): ReactElement {
     )
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
-    const result = signIn({ email, password, role: surface.role })
-    if (result.ok) {
-      navigate(getLandingPath(surface.role), { replace: true })
-      return
+    setError(null)
+    setBusy(true)
+    try {
+      const result = await signIn({ email, password, role: surface.role })
+      if (result.ok) {
+        navigate(getLandingPath(surface.role), { replace: true })
+        return
+      }
+      // The surface owns the credential wording so each door stays silent about the other.
+      setError(result.kind === 'credentials' ? surface.failureMessage : result.message)
+    } finally {
+      setBusy(false)
     }
-    setError(surface.failureMessage)
   }
 
   return (
     <section className={styles.signInPage} data-plane={surface.plane}>
-      <form className={styles.signInPanel} onSubmit={handleSubmit}>
+      <form
+        className={styles.signInPanel}
+        onSubmit={(event) => {
+          void handleSubmit(event)
+        }}
+      >
         <header className={styles.signInHeader}>
           {header}
           <h1 className="text-title">{surface.title}</h1>
@@ -508,12 +628,17 @@ function SignInPanel({ surface }: { surface: SignInSurface }): ReactElement {
           </p>
         ) : null}
 
-        <Button type="submit">Continue</Button>
+        <Button busy={busy} disabled={busy} type="submit">
+          Continue
+        </Button>
 
-        <p className={`text-caption ${styles.muted}`}>
-          Demo account <strong>{getDemoEmail(surface.role)}</strong> with password{' '}
-          <strong>{DEMO_PASSWORD}</strong>.
-        </p>
+        {isLiveApi ? null : (
+          <p className={`text-caption ${styles.muted}`}>
+            Demo mode — no API configured. Sign in as{' '}
+            <strong>{getDemoEmail(surface.role)}</strong> with password{' '}
+            <strong>{DEMO_PASSWORD}</strong>.
+          </p>
+        )}
 
         {surface.showMuseumDoorLink ? (
           <Link className={`text-caption ${styles.signInAltDoor}`} to={MUSEUM_SIGN_IN_PATH}>
