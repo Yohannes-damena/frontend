@@ -9,6 +9,7 @@ import {
   TableToolbar,
   useDataTable,
   type Column,
+  type KitState,
 } from '../../kit/index.ts'
 import {
   formatRelativeTime,
@@ -28,7 +29,7 @@ const STATUS_OPTIONS = [
 
 export function RoomsListPage(): ReactElement {
   const navigate = useNavigate()
-  const { rooms, listRoomItems } = useAuthoringStore()
+  const { rooms, listRoomItems, status, loadError, reload } = useAuthoringStore()
   const [statusFilter, setStatusFilter] = useState<readonly string[]>([])
 
   const columns = useMemo<readonly Column<RoomRecord>[]>(
@@ -104,6 +105,20 @@ export function RoomsListPage(): ReactElement {
     [rooms],
   )
 
+  const tableState: KitState =
+    status === 'loading'
+      ? { kind: 'loading', label: 'rooms' }
+      : status === 'error'
+        ? {
+            kind: 'failure',
+            title: 'Could not load rooms',
+            body: loadError ?? 'The request failed.',
+            retry: { label: 'Try again', onAct: reload },
+          }
+        : rooms.length === 0
+          ? { kind: 'empty', title: 'No rooms yet', body: 'Create your first room.' }
+          : { kind: 'ready' }
+
   return (
     <div className={styles.page}>
       <header className={styles.headerCard}>
@@ -126,9 +141,7 @@ export function RoomsListPage(): ReactElement {
           sort={table.sort}
           onSortChange={table.setSort}
           pagination={table.pagination}
-          {...(rooms.length === 0
-            ? { state: { kind: 'empty' as const, title: 'No rooms yet', body: 'Create your first room.' } }
-            : {})}
+          state={tableState}
           toolbar={
             <TableToolbar
               searchValue={table.searchQuery}

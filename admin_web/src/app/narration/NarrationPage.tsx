@@ -54,6 +54,7 @@ export function NarrationPage(): ReactElement {
   const { rooms, updateRoom } = useAuthoringStore()
   const [selectedRoomId, setSelectedRoomId] = useState<string>(rooms[0]?.id ?? '')
   const [draftScript, setDraftScript] = useState<string>('')
+  const [savingScript, setSavingScript] = useState(false)
   const [voiceByRoom, setVoiceByRoom] = useState<VoiceByRoom>(readVoiceState)
 
   useEffect(() => {
@@ -84,12 +85,26 @@ export function NarrationPage(): ReactElement {
     }))
   }, [rooms])
 
-  function handleSaveScript(): void {
+  async function handleSaveScript(): Promise<void> {
     if (selectedRoom === undefined) return
-    const nextDraft = { ...toRoomDraft(selectedRoom), narrationScript: draftScript }
-    const result = updateRoom(selectedRoom.id, nextDraft)
-    if (!result.ok) return
-    show({ tone: 'success', message: `Narration script saved for ${selectedRoom.title}.` })
+    setSavingScript(true)
+    try {
+      const nextDraft = { ...toRoomDraft(selectedRoom), narrationScript: draftScript }
+      const result = await updateRoom(selectedRoom.id, nextDraft)
+      if (!result.ok) {
+        // The only field this screen edits is the script, so any rejection
+        // belongs on it — including one the server attributed elsewhere.
+        show({
+          tone: 'danger',
+          message:
+            result.errors.narrationScript ?? result.message ?? 'Could not save the narration script.',
+        })
+        return
+      }
+      show({ tone: 'success', message: `Narration script saved for ${selectedRoom.title}.` })
+    } finally {
+      setSavingScript(false)
+    }
   }
 
   function handleRegenerate(): void {
@@ -239,7 +254,9 @@ export function NarrationPage(): ReactElement {
                 <Button tone="secondary" onClick={handleRegenerate}>
                   Regenerate audio
                 </Button>
-                <Button onClick={handleSaveScript}>Save narration script</Button>
+                <Button onClick={() => void handleSaveScript()} disabled={savingScript}>
+                  {savingScript ? 'Saving…' : 'Save narration script'}
+                </Button>
               </div>
             </div>
           )}

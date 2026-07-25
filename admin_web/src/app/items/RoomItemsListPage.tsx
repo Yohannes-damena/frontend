@@ -5,9 +5,11 @@ import {
   Button,
   DataTable,
   FilterChip,
+  StateBlock,
   TableToolbar,
   useDataTable,
   type Column,
+  type KitState,
 } from '../../kit/index.ts'
 import { formatRelativeTime, useAuthoringStore, type ItemRecord } from '../rooms/authoringStore.tsx'
 import styles from '../rooms/roomsAuthoring.module.css'
@@ -20,7 +22,7 @@ const MEDIA_FILTER_OPTIONS = [
 export function RoomItemsListPage(): ReactElement {
   const navigate = useNavigate()
   const { roomId = '' } = useParams()
-  const { findRoom, listRoomItems } = useAuthoringStore()
+  const { findRoom, listRoomItems, status, loadError, reload } = useAuthoringStore()
   const room = findRoom(roomId)
   const [mediaFilter, setMediaFilter] = useState<readonly string[]>([])
 
@@ -91,12 +93,36 @@ export function RoomItemsListPage(): ReactElement {
     [roomItems],
   )
 
+  if (status === 'loading') {
+    return (
+      <div className={styles.page}>
+        <StateBlock state={{ kind: 'loading', label: 'items' }} size="page" />
+      </div>
+    )
+  }
+
+  if (status === 'error') {
+    return (
+      <div className={styles.page}>
+        <StateBlock
+          size="page"
+          state={{
+            kind: 'failure',
+            title: 'Could not load this room',
+            body: loadError ?? 'The request failed.',
+            retry: { label: 'Try again', onAct: reload },
+          }}
+        />
+      </div>
+    )
+  }
+
   if (room === undefined) {
     return (
       <div className={styles.page}>
         <section className={styles.panelCard}>
           <h1 className="text-title">Room not found</h1>
-          <p className={`text-body ${styles.muted}`}>This room does not exist in fixture state.</p>
+          <p className={`text-body ${styles.muted}`}>This room no longer exists.</p>
           <Button tone="secondary" onClick={() => navigate('../..')}>
             Back to rooms
           </Button>
@@ -104,6 +130,11 @@ export function RoomItemsListPage(): ReactElement {
       </div>
     )
   }
+
+  const tableState: KitState =
+    roomItems.length === 0
+      ? { kind: 'empty', title: 'No items yet', body: 'Create the first item in this room.' }
+      : { kind: 'ready' }
 
   return (
     <div className={styles.page}>
@@ -130,15 +161,7 @@ export function RoomItemsListPage(): ReactElement {
           sort={table.sort}
           onSortChange={table.setSort}
           pagination={table.pagination}
-          {...(roomItems.length === 0
-            ? {
-                state: {
-                  kind: 'empty' as const,
-                  title: 'No items yet',
-                  body: 'Create the first item in this room.',
-                },
-              }
-            : {})}
+          state={tableState}
           toolbar={
             <TableToolbar
               searchValue={table.searchQuery}

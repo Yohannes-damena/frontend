@@ -20,3 +20,22 @@
 .muted {
   color: var(--content-secondary);
 }
+
+.inviteForm {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: start;
+}
+
+.inviteActions {
+  display: flex;
+  align-items: end;
+  gap: var(--space-1);
+}
+
+.rowActions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-0-5);
+}

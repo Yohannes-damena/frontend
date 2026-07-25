@@ -35,6 +35,8 @@ import { LandingPage } from './app/landing/LandingPage.tsx'
 import { RoomItemsListPage } from './app/items/RoomItemsListPage.tsx'
 import { NarrationPage } from './app/narration/NarrationPage.tsx'
 import { ActivityPage } from './app/activity/ActivityPage.tsx'
+import { CheckoutReturnPage } from './app/billing/CheckoutReturnPage.tsx'
+import { PlanPage } from './app/billing/PlanPage.tsx'
 import { TenantOverviewPage } from './app/overview/TenantOverviewPage.tsx'
 import { AuthoringStoreProvider } from './app/rooms/authoringStore.tsx'
 import { RoomEditorPage } from './app/rooms/RoomEditorPage.tsx'
@@ -178,6 +180,7 @@ function tenantRouteTree(): ReactElement {
       <Route path="narration" element={<NarrationPage />} />
       <Route path="team" element={<TeamPage />} />
       <Route path="activity" element={<ActivityPage />} />
+      <Route path="plan" element={<PlanPage />} />
 
       <Route path="settings">
         <Route index element={<Navigate to="museum" replace />} />
@@ -415,6 +418,12 @@ const appRouter = createBrowserRouter(
       <Route path="/dev/tokens" element={<TokenHarnessPage />} />
 
       <Route element={<RequireAuth />}>
+        {/*
+          Outside both shells: the payment provider returns the browser here,
+          and the page's only job is to report what happened to one payment.
+        */}
+        <Route path="/billing/return" element={<CheckoutReturnPage />} />
+
         <Route element={<FleetStoreBoundary />}>
           <Route path="/app" element={<TenantShell scopedMuseumId={null} />}>
             {tenantRouteTree()}
@@ -477,9 +486,15 @@ function RequireAuth(): ReactElement {
   return <Outlet />
 }
 
+/**
+ * The fleet reads operator-only routes, so it must not fetch for a museum
+ * administrator — the provider still wraps both planes because the tenant shell
+ * resolves a scoped museum's name through it.
+ */
 function FleetStoreBoundary(): ReactElement {
+  const { session } = useAuth()
   return (
-    <FleetStoreProvider>
+    <FleetStoreProvider enabled={session?.role === 'SYSTEM_ADMIN'}>
       <Outlet />
     </FleetStoreProvider>
   )
@@ -696,6 +711,7 @@ function RouteErrorPage(): ReactElement {
 
 function OperatorShell(): ReactElement {
   const { session, signOut } = useAuth()
+  const { museums, status: fleetStatus } = useFleetStore()
   const navigate = useNavigate()
   const location = useLocation()
   const viewport = useViewportMode()
@@ -735,16 +751,21 @@ function OperatorShell(): ReactElement {
   const isDrawer = viewport === 'drawer'
   const showCollapsedRail = !isDrawer && collapsed
   const primaryItems: readonly NavItemConfig[] = [
-    { id: 'fleet', label: 'Fleet', icon: <FleetIcon />, suffix: 42, path: '/operator/fleet' },
-    { id: 'health', label: 'Health', icon: <HealthIcon />, suffix: 3, path: '/operator/health' },
+    {
+      id: 'fleet',
+      label: 'Fleet',
+      icon: <FleetIcon />,
+      // Only once the count is real; a placeholder here reads as a fact.
+      ...(fleetStatus === 'ready' || fleetStatus === 'demo' ? { suffix: museums.length } : {}),
+      path: '/operator/fleet',
+    },
+    { id: 'health', label: 'Health', icon: <HealthIcon />, path: '/operator/health' },
     { id: 'spend', label: 'Spend', icon: <SpendIcon />, path: '/operator/spend' },
     { id: 'audit', label: 'Audit', icon: <AuditIcon />, path: '/operator/audit' },
     { id: 'admins', label: 'Admins', icon: <AdminsIcon />, path: '/operator/admins' },
   ]
   const secondaryItems: readonly NavItemConfig[] = [
-    { id: 'notices', label: 'Notices', icon: <NoticeIcon />, suffix: 5, path: '/operator/fleet' },
     { id: 'help', label: 'Help', icon: <HelpIcon />, path: '/operator/fleet' },
-    { id: 'settings', label: 'Settings', icon: <SettingsIcon />, path: '/operator/fleet' },
   ]
 
   function toggleCollapse(): void {
@@ -964,14 +985,20 @@ function TenantShell({
   const museumName = scopedMuseum?.name ?? (museumId !== null ? museumId : null)
   const isScoped = museumId !== null
   const operatorEmail = isScoped && session !== null ? session.email : null
+  const viewerEmail = session?.email ?? null
+  const effectiveMuseumId = museumId ?? session?.museumId ?? null
+  const role = session?.role ?? null
   const scopedContext = useMemo(
     () => ({
       isScoped,
       museumId,
       museumName,
       operatorEmail,
+      viewerEmail,
+      effectiveMuseumId,
+      role,
     }),
-    [isScoped, museumId, museumName, operatorEmail],
+    [isScoped, museumId, museumName, operatorEmail, viewerEmail, effectiveMuseumId, role],
   )
 
   if (session === null) {
@@ -986,15 +1013,15 @@ function TenantShell({
 
   const primaryItems: readonly NavItemConfig[] = [
     { id: 'overview', label: 'Overview', icon: <OverviewIcon />, path: `${base}/overview` },
-    { id: 'rooms', label: 'Rooms', icon: <RoomsIcon />, suffix: 4, path: `${base}/rooms` },
-    { id: 'narration', label: 'Narration', icon: <NarrationIcon />, suffix: 2, path: `${base}/narration` },
+    { id: 'rooms', label: 'Rooms', icon: <RoomsIcon />, path: `${base}/rooms` },
+    { id: 'narration', label: 'Narration', icon: <NarrationIcon />, path: `${base}/narration` },
     { id: 'team', label: 'Team', icon: <TeamIcon />, path: `${base}/team` },
     { id: 'activity', label: 'Activity', icon: <ActivityIcon />, path: `${base}/activity` },
+    { id: 'plan', label: 'Plan', icon: <SpendIcon />, path: `${base}/plan` },
     { id: 'settings', label: 'Settings', icon: <SettingsIcon />, path: `${base}/settings/museum` },
   ]
 
   const secondaryItems: readonly NavItemConfig[] = [
-    { id: 'notices', label: 'Notices', icon: <NoticeIcon />, suffix: 7, path: `${base}/activity` },
     { id: 'help', label: 'Help', icon: <HelpIcon />, path: `${base}/overview` },
     { id: 'prefs', label: 'Preferences', icon: <SettingsIcon />, path: `${base}/settings/guide` },
   ]
@@ -1366,17 +1393,6 @@ function SettingsIcon(): ReactElement {
       <>
         <circle cx="12" cy="12" r="3" />
         <path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a8 8 0 0 0-1.8-1L14.3 3h-4.6l-.4 2.9a8 8 0 0 0-1.8 1l-2.4-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a8 8 0 0 0 1.8 1l.4 2.9h4.6l.4-2.9a8 8 0 0 0 1.8-1l2.4 1 2-3.4-2-1.6c.1-.3.1-.7.1-1Z" />
-      </>
-    ),
-  })
-}
-
-function NoticeIcon(): ReactElement {
-  return iconBase({
-    children: (
-      <>
-        <path d="M12 5a5 5 0 0 0-5 5v3l-2 3h14l-2-3v-3a5 5 0 0 0-5-5Z" />
-        <path d="M10 19a2 2 0 0 0 4 0" />
       </>
     ),
   })

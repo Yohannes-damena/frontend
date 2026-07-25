@@ -208,6 +208,13 @@
   gap: var(--space-1);
 }
 
+.overrideGrid {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  align-items: start;
+}
+
 @media (max-width: 1023px) {
   .filtersRow {
     grid-template-columns: 1fr;

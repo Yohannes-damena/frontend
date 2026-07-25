@@ -1,0 +1,125 @@
+.page {
+  padding: var(--space-2);
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+.headerCard {
+  border-radius: var(--radius-surface);
+  border: var(--border-hairline-width) solid var(--panel-border);
+  background: var(--panel-surface);
+  box-shadow: var(--panel-shadow);
+  padding: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: start;
+  justify-content: space-between;
+}
+
+.headerStatus {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.muted {
+  color: var(--content-secondary);
+}
+
+.currentGrid {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.planGrid {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.planCard {
+  border-radius: var(--radius-surface);
+  border: var(--border-hairline-width) solid var(--panel-border);
+  background: var(--panel-surface);
+  box-shadow: var(--panel-shadow);
+  padding: var(--space-3);
+  display: grid;
+  gap: var(--space-1);
+  align-content: start;
+}
+
+.planCardCurrent {
+  border-color: var(--tone-success-border, var(--panel-border));
+}
+
+.planHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+.price {
+  margin: 0;
+}
+
+.limitList {
+  list-style: none;
+  margin: var(--space-1) 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-0-5);
+  color: var(--content-secondary);
+}
+
+.paymentList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.paymentRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  padding: var(--space-1) 0;
+  border-top: var(--border-hairline-width) solid var(--panel-border);
+}
+
+.paymentRow:first-child {
+  border-top: none;
+}
+
+/* The return page stands alone, outside the shell, so it centres itself. */
+.returnPage {
+  padding: var(--space-4) var(--space-2);
+  display: grid;
+  gap: var(--space-2);
+  justify-content: center;
+  align-content: start;
+  width: min(640px, 100%);
+  margin: 0 auto;
+}
+
+.returnHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.returnActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}

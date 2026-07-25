@@ -23,15 +23,28 @@ export type RequestOptions = {
   readonly timeoutMs?: number
 }
 
+/**
+ * Only consulted when a response carries no error envelope, which in practice
+ * means it never reached the app — a proxy 502, a gateway timeout. Every route
+ * that does reach the error handler names its own code, and that always wins.
+ *
+ * 422 maps to INVALID_ROOM_SEQUENCE because that is the only 422 the console
+ * can currently provoke; TICKET_URL_INVALID shares the status but always
+ * arrives with an envelope.
+ */
 const STATUS_FALLBACK: Readonly<Record<number, ApiErrorCode>> = {
   400: 'VALIDATION_ERROR',
   401: 'UNAUTHENTICATED',
   403: 'FORBIDDEN',
   404: 'NOT_FOUND',
   409: 'CONFLICT',
-  413: 'PAYLOAD_TOO_LARGE',
+  413: 'VALIDATION_ERROR',
   422: 'INVALID_ROOM_SEQUENCE',
   429: 'RATE_LIMITED',
+  500: 'INTERNAL_ERROR',
+  502: 'UPSTREAM_FAILURE',
+  503: 'UPSTREAM_UNAVAILABLE',
+  504: 'UPSTREAM_UNAVAILABLE',
 }
 
 function buildUrl(path: string, query: RequestOptions['query']): string {

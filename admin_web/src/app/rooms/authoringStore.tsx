@@ -1,14 +1,52 @@
 import {
   createContext,
+  useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactElement,
   type ReactNode,
 } from 'react'
 
+import {
+  createItem as apiCreateItem,
+  createRoom as apiCreateRoom,
+  deleteItem as apiDeleteItem,
+  deleteRoom as apiDeleteRoom,
+  listAllItems,
+  listAllRooms,
+  updateItem as apiUpdateItem,
+  updateRoom as apiUpdateRoom,
+  urlOrNull,
+} from '../../api/adminApi.ts'
+import { isLiveApi } from '../../api/config.ts'
+import { isApiError, messageForCode, type ApiError } from '../../api/errors.ts'
+import type { ApiItem, ApiRoom } from '../../api/types.ts'
 import type { StatusTone } from '../../kit/index.ts'
 
+/**
+ * Rooms and items, backed by the admin API.
+ *
+ * Two things are worth knowing before changing anything here.
+ *
+ * First, display order is 1-based in this store and 0-based on the wire. A
+ * curator numbers exhibits from one, and the API stores a dense 0,1,2… that its
+ * bulk-reorder route also produces. Converting in one place is less surprising
+ * than either side bending: `fromApiItem` adds one, `toApiDisplayOrder` takes it
+ * away, and nothing else in the app should touch the raw value.
+ *
+ * Second, when no API base URL is configured the whole store falls back to the
+ * seeded fixtures below and never makes a request. That is the demo mode the
+ * landing page advertises, not a stub left behind — `isLiveApi` is the switch.
+ */
+
+/**
+ * Derived from the room's own columns rather than stored: there is no narration
+ * status in the data model. `revision` is therefore unreachable against a real
+ * API and only ever appears in demo mode.
+ */
 export type NarrationStatus = 'ready' | 'generating' | 'revision' | 'not_started'
 
 export type RoomRecord = {
@@ -31,6 +69,7 @@ export type ItemRecord = {
   readonly shortDescription: string
   readonly detailText: string
   readonly imageUrl: string
+  /** 1-based for display. The API stores this 0-based; see the file comment. */
   readonly displayOrder: number
   readonly lastEditedAt: string
 }
@@ -54,43 +93,60 @@ export type ItemDraft = {
 export type RoomDraftErrors = {
   readonly title?: string
   readonly storyOrder?: string
+  readonly roomOverviewText?: string
+  readonly narrationScript?: string
   readonly nextRoomId?: string
 }
 
 export type ItemDraftErrors = {
   readonly name?: string
+  readonly shortDescription?: string
+  readonly detailText?: string
+  readonly imageUrl?: string
   readonly displayOrder?: string
 }
+
+/** `message` carries anything the server said that no single field owns. */
+export type RoomMutation =
+  | { readonly ok: true; readonly roomId: string }
+  | { readonly ok: false; readonly errors: RoomDraftErrors; readonly message?: string }
+
+export type ItemMutation =
+  | { readonly ok: true; readonly itemId: string }
+  | { readonly ok: false; readonly errors: ItemDraftErrors; readonly message?: string }
+
+export type DeleteOutcome =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly message: string; readonly code?: string }
 
 type AuthoringState = {
   readonly rooms: readonly RoomRecord[]
   readonly items: readonly ItemRecord[]
 }
 
-type AuthoringStore = {
+export type AuthoringStore = {
   readonly rooms: readonly RoomRecord[]
   readonly items: readonly ItemRecord[]
+  /** 'demo' means no API is configured and these are fixtures. */
+  readonly status: 'loading' | 'ready' | 'error' | 'demo'
+  readonly loadError: string | null
+  readonly reload: () => void
   readonly findRoom: (roomId: string) => RoomRecord | undefined
   readonly findItem: (itemId: string) => ItemRecord | undefined
   readonly listRoomItems: (roomId: string) => readonly ItemRecord[]
   readonly validateRoom: (draft: RoomDraft, editingRoomId: string | null) => RoomDraftErrors
-  readonly validateItem: (draft: ItemDraft, editingItemId: string | null, roomId: string) => ItemDraftErrors
-  readonly createRoom: (draft: RoomDraft) => { ok: true; roomId: string } | { ok: false; errors: RoomDraftErrors }
-  readonly updateRoom: (
-    roomId: string,
-    draft: RoomDraft,
-  ) => { ok: true } | { ok: false; errors: RoomDraftErrors }
-  readonly deleteRoom: (roomId: string) => void
-  readonly createItem: (
-    roomId: string,
+  readonly validateItem: (
     draft: ItemDraft,
-  ) => { ok: true; itemId: string } | { ok: false; errors: ItemDraftErrors }
-  readonly updateItem: (
-    itemId: string,
+    editingItemId: string | null,
     roomId: string,
-    draft: ItemDraft,
-  ) => { ok: true } | { ok: false; errors: ItemDraftErrors }
-  readonly deleteItem: (itemId: string) => void
+  ) => ItemDraftErrors
+  readonly createRoom: (draft: RoomDraft) => Promise<RoomMutation>
+  readonly updateRoom: (roomId: string, draft: RoomDraft) => Promise<RoomMutation>
+  /** Pass `force` to null out other rooms' links instead of failing with ROOM_REFERENCED. */
+  readonly deleteRoom: (roomId: string, options?: { force?: boolean }) => Promise<DeleteOutcome>
+  readonly createItem: (roomId: string, draft: ItemDraft) => Promise<ItemMutation>
+  readonly updateItem: (itemId: string, roomId: string, draft: ItemDraft) => Promise<ItemMutation>
+  readonly deleteItem: (itemId: string) => Promise<DeleteOutcome>
 }
 
 const DEFAULT_MUSEUM_ID = 'museum-adwa'
@@ -228,6 +284,107 @@ function createItemId(name: string): string {
   return `i-${slug || 'item'}-${Date.now().toString(36)}`
 }
 
+// -- API translation -------------------------------------------------------
+
+/**
+ * A script with no audio behind it is genuinely mid-pipeline, so `generating`
+ * is the accurate word for it rather than a placeholder.
+ */
+function narrationStatusFor(room: ApiRoom): NarrationStatus {
+  if (room.narrationScript.trim().length === 0) return 'not_started'
+  return room.roomAudioUrl === null ? 'generating' : 'ready'
+}
+
+function fromApiRoom(room: ApiRoom): RoomRecord {
+  return {
+    id: room.id,
+    museumId: room.museumId,
+    title: room.title,
+    storyOrder: room.storyOrder,
+    roomOverviewText: room.roomOverviewText,
+    narrationScript: room.narrationScript,
+    nextRoomId: room.nextRoomId,
+    narrationStatus: narrationStatusFor(room),
+    lastEditedAt: room.updatedAt,
+  }
+}
+
+function fromApiItem(item: ApiItem, museumId: string): ItemRecord {
+  return {
+    id: item.id,
+    museumId,
+    roomId: item.roomId,
+    name: item.name,
+    shortDescription: item.shortDescription,
+    detailText: item.detailText,
+    imageUrl: item.imageUrl ?? '',
+    displayOrder: item.displayOrder + 1,
+    lastEditedAt: item.updatedAt,
+  }
+}
+
+function toApiDisplayOrder(oneBased: number): number {
+  return Math.max(0, oneBased - 1)
+}
+
+/**
+ * Turns a server rejection back into per-field messages so it lands under the
+ * input that caused it. Anything the server did not attribute to a field comes
+ * back as `message` for the form-level banner.
+ */
+function mapServerErrors<K extends string>(
+  error: ApiError,
+  fields: readonly K[],
+): { errors: Partial<Record<K, string>>; message: string } {
+  const errors: Partial<Record<K, string>> = {}
+  for (const field of fields) {
+    const fieldMessage = error.fieldError(field)
+    if (fieldMessage !== undefined) errors[field] = fieldMessage
+  }
+  return { errors, message: messageForCode(error) }
+}
+
+const ROOM_FIELDS = [
+  'title',
+  'storyOrder',
+  'roomOverviewText',
+  'narrationScript',
+  'nextRoomId',
+] as const
+
+const ITEM_FIELDS = [
+  'name',
+  'shortDescription',
+  'detailText',
+  'imageUrl',
+  'displayOrder',
+] as const
+
+function failedRoom(error: unknown): RoomMutation {
+  if (isApiError(error)) {
+    const mapped = mapServerErrors(error, ROOM_FIELDS)
+    return { ok: false, errors: mapped.errors, message: mapped.message }
+  }
+  throw error
+}
+
+function failedItem(error: unknown): ItemMutation {
+  if (isApiError(error)) {
+    const mapped = mapServerErrors(error, ITEM_FIELDS)
+    return { ok: false, errors: mapped.errors, message: mapped.message }
+  }
+  throw error
+}
+
+function failedDelete(error: unknown): DeleteOutcome {
+  if (isApiError(error)) {
+    return { ok: false, message: messageForCode(error), code: error.code }
+  }
+  throw error
+}
+
+// -- Sorting and validation ------------------------------------------------
+
 function sortRooms(rooms: readonly RoomRecord[]): readonly RoomRecord[] {
   return [...rooms].sort((left, right) => {
     if (left.storyOrder !== right.storyOrder) return left.storyOrder - right.storyOrder
@@ -278,7 +435,13 @@ function validateRoomDraftAgainst(
   draft: RoomDraft,
   editingRoomId: string | null,
 ): RoomDraftErrors {
-  const errors: { title?: string; storyOrder?: string; nextRoomId?: string } = {}
+  const errors: {
+    title?: string
+    storyOrder?: string
+    roomOverviewText?: string
+    narrationScript?: string
+    nextRoomId?: string
+  } = {}
   const title = draft.title.trim()
   const storyOrder = parsePositiveInteger(draft.storyOrder)
   const nextRoomId = draft.nextRoomId.length > 0 ? draft.nextRoomId : null
@@ -286,6 +449,16 @@ function validateRoomDraftAgainst(
 
   if (title.length === 0) {
     errors.title = 'Enter a room title.'
+  }
+
+  // Both are required by the API, and both are load-bearing for the visitor
+  // experience: the overview grounds chat, the script is what gets spoken.
+  // Catching them here turns a 400 into an inline message.
+  if (draft.roomOverviewText.trim().length === 0) {
+    errors.roomOverviewText = 'Enter grounding context for this room.'
+  }
+  if (draft.narrationScript.trim().length === 0) {
+    errors.narrationScript = 'Enter a narration script.'
   }
 
   if (storyOrder === null) {
@@ -318,7 +491,8 @@ function validateRoomDraftAgainst(
       roomOverviewText: draft.roomOverviewText,
       narrationScript: draft.narrationScript,
       nextRoomId,
-      narrationStatus: editingRoomId === null ? 'not_started' : museumRooms[0]?.narrationStatus ?? 'not_started',
+      narrationStatus:
+        editingRoomId === null ? 'not_started' : (museumRooms[0]?.narrationStatus ?? 'not_started'),
       lastEditedAt: nowIso(),
     }
 
@@ -343,8 +517,29 @@ function validateItemDraftAgainst(
   draft: ItemDraft,
   editingItemId: string | null,
 ): ItemDraftErrors {
-  const errors: { name?: string; displayOrder?: string } = {}
+  const errors: {
+    name?: string
+    shortDescription?: string
+    detailText?: string
+    imageUrl?: string
+    displayOrder?: string
+  } = {}
+
   if (draft.name.trim().length === 0) errors.name = 'Enter an item name.'
+  if (draft.shortDescription.trim().length === 0) {
+    errors.shortDescription = 'Enter a short description.'
+  }
+  if (draft.detailText.trim().length === 0) {
+    errors.detailText = 'Enter the grounding detail for this item.'
+  }
+
+  // An empty field means "no image" and is sent as null. Anything else has to
+  // be a real absolute URL, because that is what the API stores.
+  const imageUrl = draft.imageUrl.trim()
+  if (imageUrl.length > 0 && !isAbsoluteUrl(imageUrl)) {
+    errors.imageUrl = 'Enter a full image URL, including https://, or leave it empty.'
+  }
+
   const displayOrder = parsePositiveInteger(draft.displayOrder)
   if (displayOrder === null) {
     errors.displayOrder = 'Display order must be a positive number.'
@@ -362,6 +557,17 @@ function validateItemDraftAgainst(
   }
   return errors
 }
+
+function isAbsoluteUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+// -- Display helpers -------------------------------------------------------
 
 export function narrationTone(status: NarrationStatus): StatusTone {
   if (status === 'ready') return 'success'
@@ -432,6 +638,8 @@ export function createEmptyItemDraft(): ItemDraft {
   return { ...EMPTY_ITEM_DRAFT }
 }
 
+// -- Provider --------------------------------------------------------------
+
 export function AuthoringStoreProvider({
   children,
   museumId,
@@ -440,144 +648,333 @@ export function AuthoringStoreProvider({
   readonly museumId: string | null
 }): ReactElement {
   const resolvedMuseumId = museumId ?? DEFAULT_MUSEUM_ID
-  const [byMuseum, setByMuseum] = useState<Record<string, AuthoringState>>(() => ({
-    [resolvedMuseumId]: museumStateFromSeed(resolvedMuseumId),
-  }))
 
-  const museumState = byMuseum[resolvedMuseumId] ?? museumStateFromSeed(resolvedMuseumId)
+  const [state, setState] = useState<AuthoringState>(() =>
+    isLiveApi ? { rooms: [], items: [] } : museumStateFromSeed(resolvedMuseumId),
+  )
+  const [status, setStatus] = useState<AuthoringStore['status']>(isLiveApi ? 'loading' : 'demo')
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [reloadToken, setReloadToken] = useState(0)
 
-  function updateMuseum(update: (current: AuthoringState) => AuthoringState): void {
-    setByMuseum((current) => {
-      const existing = current[resolvedMuseumId] ?? museumStateFromSeed(resolvedMuseumId)
-      return {
-        ...current,
-        [resolvedMuseumId]: update(existing),
+  // Guards against a slower response for a museum the operator has already
+  // navigated away from overwriting the one now on screen.
+  const requestSeq = useRef(0)
+
+  const reload = useCallback(() => {
+    setReloadToken((token) => token + 1)
+  }, [])
+
+  useEffect(() => {
+    if (!isLiveApi) {
+      setState(museumStateFromSeed(resolvedMuseumId))
+      setStatus('demo')
+      return
+    }
+
+    const seq = requestSeq.current + 1
+    requestSeq.current = seq
+    let cancelled = false
+
+    setStatus('loading')
+    setLoadError(null)
+
+    async function load(): Promise<void> {
+      try {
+        // A system admin browsing a tenant passes the museum id explicitly; a
+        // museum admin's token already names it, and the server ignores what
+        // is sent. Passing it is correct in both cases.
+        const rooms = await listAllRooms(museumId)
+        // Items are per-room, so this is one request per room. Rooms are a
+        // handful per museum by design, and doing it up front keeps every
+        // authoring screen working off one consistent snapshot.
+        const itemLists = await Promise.all(rooms.map((room) => listAllItems(room.id)))
+
+        if (cancelled || requestSeq.current !== seq) return
+
+        setState({
+          rooms: rooms.map(fromApiRoom),
+          items: itemLists
+            .flat()
+            .map((item) => fromApiItem(item, rooms[0]?.museumId ?? resolvedMuseumId)),
+        })
+        setStatus('ready')
+      } catch (error) {
+        if (cancelled || requestSeq.current !== seq) return
+        setLoadError(
+          isApiError(error) ? messageForCode(error) : 'Could not load rooms for this museum.',
+        )
+        setStatus('error')
       }
-    })
-  }
+    }
+
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [museumId, resolvedMuseumId, reloadToken])
 
   const value = useMemo<AuthoringStore>(() => {
-    const rooms = sortRooms(museumState.rooms.filter((room) => room.museumId === resolvedMuseumId))
-    const items = sortItems(museumState.items.filter((item) => item.museumId === resolvedMuseumId))
+    const rooms = sortRooms(state.rooms)
+    const items = sortItems(state.items)
+
+    /** Demo mode keeps the old in-memory behaviour so the app is usable offline. */
+    function mutateLocal(update: (current: AuthoringState) => AuthoringState): void {
+      setState(update)
+    }
 
     return {
       rooms,
       items,
+      status,
+      loadError,
+      reload,
       findRoom: (roomId) => rooms.find((room) => room.id === roomId),
       findItem: (itemId) => items.find((item) => item.id === itemId),
       listRoomItems: (roomId) => items.filter((item) => item.roomId === roomId),
       validateRoom: (draft, editingRoomId) =>
-        validateRoomDraftAgainst(museumState, resolvedMuseumId, draft, editingRoomId),
+        validateRoomDraftAgainst(state, resolvedMuseumId, draft, editingRoomId),
       validateItem: (draft, editingItemId, roomId) =>
-        validateItemDraftAgainst(museumState, resolvedMuseumId, roomId, draft, editingItemId),
-      createRoom: (draft) => {
-        const errors = validateRoomDraftAgainst(museumState, resolvedMuseumId, draft, null)
+        validateItemDraftAgainst(state, resolvedMuseumId, roomId, draft, editingItemId),
+
+      async createRoom(draft) {
+        const errors = validateRoomDraftAgainst(state, resolvedMuseumId, draft, null)
         if (Object.keys(errors).length > 0) return { ok: false, errors }
-        const roomId = createRoomId(draft.title)
-        const storyOrder = parsePositiveInteger(draft.storyOrder)!
-        updateMuseum((current) => ({
-          ...current,
-          rooms: [
-            ...current.rooms,
-            {
-              id: roomId,
-              museumId: resolvedMuseumId,
-              title: draft.title.trim(),
-              storyOrder,
-              roomOverviewText: draft.roomOverviewText.trim(),
-              narrationScript: draft.narrationScript.trim(),
-              nextRoomId: draft.nextRoomId.trim().length > 0 ? draft.nextRoomId : null,
-              narrationStatus: 'not_started',
-              lastEditedAt: nowIso(),
-            },
-          ],
-        }))
-        return { ok: true, roomId }
+        const storyOrder = parsePositiveInteger(draft.storyOrder)
+        if (storyOrder === null) {
+          return { ok: false, errors: { storyOrder: 'Story order must be a positive number.' } }
+        }
+        const nextRoomId = draft.nextRoomId.trim().length > 0 ? draft.nextRoomId.trim() : null
+
+        if (!isLiveApi) {
+          const roomId = createRoomId(draft.title)
+          mutateLocal((current) => ({
+            ...current,
+            rooms: [
+              ...current.rooms,
+              {
+                id: roomId,
+                museumId: resolvedMuseumId,
+                title: draft.title.trim(),
+                storyOrder,
+                roomOverviewText: draft.roomOverviewText.trim(),
+                narrationScript: draft.narrationScript.trim(),
+                nextRoomId,
+                narrationStatus: 'not_started',
+                lastEditedAt: nowIso(),
+              },
+            ],
+          }))
+          return { ok: true, roomId }
+        }
+
+        try {
+          const created = await apiCreateRoom({
+            ...(museumId !== null ? { museumId } : {}),
+            title: draft.title.trim(),
+            storyOrder,
+            roomOverviewText: draft.roomOverviewText.trim(),
+            narrationScript: draft.narrationScript.trim(),
+            nextRoomId,
+          })
+          const record = fromApiRoom(created)
+          mutateLocal((current) => ({ ...current, rooms: [...current.rooms, record] }))
+          return { ok: true, roomId: record.id }
+        } catch (error) {
+          return failedRoom(error)
+        }
       },
-      updateRoom: (roomId, draft) => {
-        const errors = validateRoomDraftAgainst(museumState, resolvedMuseumId, draft, roomId)
+
+      async updateRoom(roomId, draft) {
+        const errors = validateRoomDraftAgainst(state, resolvedMuseumId, draft, roomId)
         if (Object.keys(errors).length > 0) return { ok: false, errors }
-        const storyOrder = parsePositiveInteger(draft.storyOrder)!
-        updateMuseum((current) => ({
-          ...current,
-          rooms: current.rooms.map((room) =>
-            room.id === roomId
-              ? {
-                  ...room,
-                  title: draft.title.trim(),
-                  storyOrder,
-                  roomOverviewText: draft.roomOverviewText.trim(),
-                  narrationScript: draft.narrationScript.trim(),
-                  nextRoomId: draft.nextRoomId.trim().length > 0 ? draft.nextRoomId : null,
-                  lastEditedAt: nowIso(),
-                }
-              : room,
-          ),
-        }))
-        return { ok: true }
+        const storyOrder = parsePositiveInteger(draft.storyOrder)
+        if (storyOrder === null) {
+          return { ok: false, errors: { storyOrder: 'Story order must be a positive number.' } }
+        }
+        const nextRoomId = draft.nextRoomId.trim().length > 0 ? draft.nextRoomId.trim() : null
+
+        if (!isLiveApi) {
+          mutateLocal((current) => ({
+            ...current,
+            rooms: current.rooms.map((room) =>
+              room.id === roomId
+                ? {
+                    ...room,
+                    title: draft.title.trim(),
+                    storyOrder,
+                    roomOverviewText: draft.roomOverviewText.trim(),
+                    narrationScript: draft.narrationScript.trim(),
+                    nextRoomId,
+                    lastEditedAt: nowIso(),
+                  }
+                : room,
+            ),
+          }))
+          return { ok: true, roomId }
+        }
+
+        try {
+          const updated = await apiUpdateRoom(roomId, {
+            title: draft.title.trim(),
+            storyOrder,
+            roomOverviewText: draft.roomOverviewText.trim(),
+            narrationScript: draft.narrationScript.trim(),
+            nextRoomId,
+          })
+          const record = fromApiRoom(updated)
+          mutateLocal((current) => ({
+            ...current,
+            rooms: current.rooms.map((room) => (room.id === roomId ? record : room)),
+          }))
+          return { ok: true, roomId }
+        } catch (error) {
+          return failedRoom(error)
+        }
       },
-      deleteRoom: (roomId) => {
-        updateMuseum((current) => ({
-          ...current,
-          rooms: current.rooms.filter((room) => room.id !== roomId),
-          items: current.items.filter((item) => item.roomId !== roomId),
-        }))
+
+      async deleteRoom(roomId, options = {}) {
+        if (!isLiveApi) {
+          mutateLocal((current) => ({
+            rooms: current.rooms.filter((room) => room.id !== roomId),
+            items: current.items.filter((item) => item.roomId !== roomId),
+          }))
+          return { ok: true }
+        }
+
+        try {
+          await apiDeleteRoom(roomId, { force: options.force === true })
+          mutateLocal((current) => ({
+            // Items cascade server-side, so dropping them here keeps the two
+            // in step without a refetch.
+            rooms: current.rooms.filter((room) => room.id !== roomId),
+            items: current.items.filter((item) => item.roomId !== roomId),
+          }))
+          // A forced delete nulls other rooms' nextRoomId, which this snapshot
+          // cannot know about, so the sequence is re-read rather than guessed.
+          if (options.force === true) reload()
+          return { ok: true }
+        } catch (error) {
+          return failedDelete(error)
+        }
       },
-      createItem: (roomId, draft) => {
-        const errors = validateItemDraftAgainst(museumState, resolvedMuseumId, roomId, draft, null)
+
+      async createItem(roomId, draft) {
+        const errors = validateItemDraftAgainst(state, resolvedMuseumId, roomId, draft, null)
         if (Object.keys(errors).length > 0) return { ok: false, errors }
-        const itemId = createItemId(draft.name)
-        const displayOrder = parsePositiveInteger(draft.displayOrder)!
-        updateMuseum((current) => ({
-          ...current,
-          items: [
-            ...current.items,
-            {
-              id: itemId,
-              museumId: resolvedMuseumId,
-              roomId,
-              name: draft.name.trim(),
-              shortDescription: draft.shortDescription.trim(),
-              detailText: draft.detailText.trim(),
-              imageUrl: draft.imageUrl.trim(),
-              displayOrder,
-              lastEditedAt: nowIso(),
-            },
-          ],
-        }))
-        return { ok: true, itemId }
+        const displayOrder = parsePositiveInteger(draft.displayOrder)
+        if (displayOrder === null) {
+          return { ok: false, errors: { displayOrder: 'Display order must be a positive number.' } }
+        }
+
+        if (!isLiveApi) {
+          const itemId = createItemId(draft.name)
+          mutateLocal((current) => ({
+            ...current,
+            items: [
+              ...current.items,
+              {
+                id: itemId,
+                museumId: resolvedMuseumId,
+                roomId,
+                name: draft.name.trim(),
+                shortDescription: draft.shortDescription.trim(),
+                detailText: draft.detailText.trim(),
+                imageUrl: draft.imageUrl.trim(),
+                displayOrder,
+                lastEditedAt: nowIso(),
+              },
+            ],
+          }))
+          return { ok: true, itemId }
+        }
+
+        try {
+          const created = await apiCreateItem({
+            roomId,
+            name: draft.name.trim(),
+            shortDescription: draft.shortDescription.trim(),
+            detailText: draft.detailText.trim(),
+            imageUrl: urlOrNull(draft.imageUrl),
+            displayOrder: toApiDisplayOrder(displayOrder),
+          })
+          const record = fromApiItem(created, resolvedMuseumId)
+          mutateLocal((current) => ({ ...current, items: [...current.items, record] }))
+          return { ok: true, itemId: record.id }
+        } catch (error) {
+          return failedItem(error)
+        }
       },
-      updateItem: (itemId, roomId, draft) => {
-        const errors = validateItemDraftAgainst(museumState, resolvedMuseumId, roomId, draft, itemId)
+
+      async updateItem(itemId, roomId, draft) {
+        const errors = validateItemDraftAgainst(state, resolvedMuseumId, roomId, draft, itemId)
         if (Object.keys(errors).length > 0) return { ok: false, errors }
-        const displayOrder = parsePositiveInteger(draft.displayOrder)!
-        updateMuseum((current) => ({
-          ...current,
-          items: current.items.map((item) =>
-            item.id === itemId
-              ? {
-                  ...item,
-                  roomId,
-                  name: draft.name.trim(),
-                  shortDescription: draft.shortDescription.trim(),
-                  detailText: draft.detailText.trim(),
-                  imageUrl: draft.imageUrl.trim(),
-                  displayOrder,
-                  lastEditedAt: nowIso(),
-                }
-              : item,
-          ),
-        }))
-        return { ok: true }
+        const displayOrder = parsePositiveInteger(draft.displayOrder)
+        if (displayOrder === null) {
+          return { ok: false, errors: { displayOrder: 'Display order must be a positive number.' } }
+        }
+
+        if (!isLiveApi) {
+          mutateLocal((current) => ({
+            ...current,
+            items: current.items.map((item) =>
+              item.id === itemId
+                ? {
+                    ...item,
+                    roomId,
+                    name: draft.name.trim(),
+                    shortDescription: draft.shortDescription.trim(),
+                    detailText: draft.detailText.trim(),
+                    imageUrl: draft.imageUrl.trim(),
+                    displayOrder,
+                    lastEditedAt: nowIso(),
+                  }
+                : item,
+            ),
+          }))
+          return { ok: true, itemId }
+        }
+
+        try {
+          const updated = await apiUpdateItem(itemId, {
+            name: draft.name.trim(),
+            shortDescription: draft.shortDescription.trim(),
+            detailText: draft.detailText.trim(),
+            imageUrl: urlOrNull(draft.imageUrl),
+            displayOrder: toApiDisplayOrder(displayOrder),
+          })
+          const record = fromApiItem(updated, resolvedMuseumId)
+          mutateLocal((current) => ({
+            ...current,
+            items: current.items.map((item) => (item.id === itemId ? record : item)),
+          }))
+          return { ok: true, itemId }
+        } catch (error) {
+          return failedItem(error)
+        }
       },
-      deleteItem: (itemId) => {
-        updateMuseum((current) => ({
-          ...current,
-          items: current.items.filter((item) => item.id !== itemId),
-        }))
+
+      async deleteItem(itemId) {
+        if (!isLiveApi) {
+          mutateLocal((current) => ({
+            ...current,
+            items: current.items.filter((item) => item.id !== itemId),
+          }))
+          return { ok: true }
+        }
+
+        try {
+          await apiDeleteItem(itemId)
+          mutateLocal((current) => ({
+            ...current,
+            items: current.items.filter((item) => item.id !== itemId),
+          }))
+          return { ok: true }
+        } catch (error) {
+          return failedDelete(error)
+        }
       },
     }
-  }, [museumState, resolvedMuseumId])
+  }, [state, status, loadError, reload, resolvedMuseumId, museumId])
 
   return <storeContext.Provider value={value}>{children}</storeContext.Provider>
 }

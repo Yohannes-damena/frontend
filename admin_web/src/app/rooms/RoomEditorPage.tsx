@@ -6,6 +6,7 @@ import {
   ConfirmDialog,
   Field,
   Select,
+  StateBlock,
   TextArea,
   TextInput,
   useToast,
@@ -32,10 +33,22 @@ export function RoomEditorPage({ mode }: { readonly mode: RoomEditorMode }): Rea
   const navigate = useNavigate()
   const { roomId = '' } = useParams()
   const { show } = useToast()
-  const { rooms, listRoomItems, findRoom, createRoom, updateRoom, deleteRoom } = useAuthoringStore()
+  const {
+    rooms,
+    listRoomItems,
+    findRoom,
+    createRoom,
+    updateRoom,
+    deleteRoom,
+    status,
+    loadError,
+    reload,
+  } = useAuthoringStore()
 
   const room = mode === 'edit' ? findRoom(roomId) : undefined
-  const isMissing = mode === 'edit' && room === undefined
+  // Only "missing" once the rooms have actually arrived — otherwise the first
+  // render of a deep link would claim the room does not exist.
+  const isMissing = mode === 'edit' && room === undefined && status !== 'loading'
   const baseline = useMemo(() => {
     if (mode === 'create') return createEmptyRoomDraft()
     if (room !== undefined) return toRoomDraft(room)
@@ -44,8 +57,13 @@ export function RoomEditorPage({ mode }: { readonly mode: RoomEditorMode }): Rea
 
   const [draft, setDraft] = useState<RoomDraft>(baseline)
   const [errors, setErrors] = useState<RoomDraftErrors>(EMPTY_ROOM_ERRORS)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const [discardModalOpen, setDiscardModalOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  // A room another room points at is refused until the operator says to break
+  // the link, so the second confirmation is a distinct decision from the first.
+  const [forceDeleteOpen, setForceDeleteOpen] = useState(false)
 
   const dirty = !roomDraftEquals(draft, baseline)
   const unsavedGuard = useUnsavedChangesGuard(dirty)
@@ -60,13 +78,37 @@ export function RoomEditorPage({ mode }: { readonly mode: RoomEditorMode }): Rea
   const itemSummary = room === undefined ? 'Items can be added after the room is created.' : undefined
   const roomItems = room === undefined ? [] : listRoomItems(room.id)
 
+  if (status === 'loading') {
+    return (
+      <div className={styles.page}>
+        <StateBlock state={{ kind: 'loading', label: 'room' }} size="page" />
+      </div>
+    )
+  }
+
+  if (status === 'error') {
+    return (
+      <div className={styles.page}>
+        <StateBlock
+          size="page"
+          state={{
+            kind: 'failure',
+            title: 'Could not load this room',
+            body: loadError ?? 'The request failed.',
+            retry: { label: 'Try again', onAct: reload },
+          }}
+        />
+      </div>
+    )
+  }
+
   if (isMissing) {
     return (
       <div className={styles.page}>
         <section className={styles.panelCard}>
           <h1 className="text-title">Room not found</h1>
           <p className={`text-body ${styles.muted}`}>
-            The selected room no longer exists in fixtures. Return to the rooms list.
+            This room no longer exists. Return to the rooms list.
           </p>
           <Button tone="secondary" onClick={() => navigate('..')}>
             Back to rooms
@@ -78,36 +120,44 @@ export function RoomEditorPage({ mode }: { readonly mode: RoomEditorMode }): Rea
 
   function setField<Key extends keyof RoomDraft>(key: Key, value: RoomDraft[Key]): void {
     setDraft((current) => ({ ...current, [key]: value }))
+    setFormError(null)
     if (errors[key as keyof RoomDraftErrors] !== undefined) {
       setErrors((current) => ({ ...current, [key]: undefined }))
     }
   }
 
-  function commitSave(): void {
-    if (mode === 'create') {
-      const created = createRoom(draft)
-      if (!created.ok) {
-        setErrors(created.errors)
+  async function commitSave(): Promise<void> {
+    setSaving(true)
+    setFormError(null)
+    try {
+      const result =
+        mode === 'create' ? await createRoom(draft) : await updateRoom(roomId, draft)
+
+      if (!result.ok) {
+        setErrors(result.errors)
+        // Only surfaced when the server rejected the request without naming a
+        // field; otherwise the inline messages already say what is wrong.
+        setFormError(Object.keys(result.errors).length === 0 ? (result.message ?? null) : null)
         return
       }
-      show({ tone: 'success', message: 'Room created.' })
-      unsavedGuard.allowNextNavigation()
-      navigate(`../${created.roomId}`, { replace: true })
-      return
-    }
 
-    const updated = updateRoom(roomId, draft)
-    if (!updated.ok) {
-      setErrors(updated.errors)
-      return
+      setErrors(EMPTY_ROOM_ERRORS)
+      if (mode === 'create') {
+        show({ tone: 'success', message: 'Room created.' })
+        unsavedGuard.allowNextNavigation()
+        navigate(`../${result.roomId}`, { replace: true })
+        return
+      }
+      show({ tone: 'success', message: 'Room saved.' })
+    } finally {
+      setSaving(false)
     }
-    show({ tone: 'success', message: 'Room saved.' })
-    setErrors(EMPTY_ROOM_ERRORS)
   }
 
   function resetDraft(): void {
     setDraft(baseline)
     setErrors(EMPTY_ROOM_ERRORS)
+    setFormError(null)
     setDiscardModalOpen(false)
   }
 
@@ -119,12 +169,26 @@ export function RoomEditorPage({ mode }: { readonly mode: RoomEditorMode }): Rea
     setDiscardModalOpen(true)
   }
 
-  function attemptDelete(): void {
+  async function runDelete(force: boolean): Promise<void> {
     if (mode !== 'edit' || room === undefined) return
-    deleteRoom(room.id)
-    show({ tone: 'success', message: 'Room deleted.' })
-    unsavedGuard.allowNextNavigation()
-    navigate('..', { replace: true })
+    setSaving(true)
+    try {
+      const result = await deleteRoom(room.id, { force })
+      if (!result.ok) {
+        setDeleteModalOpen(false)
+        if (result.code === 'ROOM_REFERENCED') {
+          setForceDeleteOpen(true)
+          return
+        }
+        show({ tone: 'danger', message: result.message })
+        return
+      }
+      show({ tone: 'success', message: 'Room deleted.' })
+      unsavedGuard.allowNextNavigation()
+      navigate('..', { replace: true })
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -193,7 +257,12 @@ export function RoomEditorPage({ mode }: { readonly mode: RoomEditorMode }): Rea
             )}
           </Field>
 
-          <Field id="room-overview" label="Overview text (AI grounding)" required>
+          <Field
+            id="room-overview"
+            label="Overview text (AI grounding)"
+            required
+            {...(errors.roomOverviewText !== undefined ? { error: errors.roomOverviewText } : {})}
+          >
             {(control) => (
               <TextArea
                 {...control}
@@ -206,7 +275,12 @@ export function RoomEditorPage({ mode }: { readonly mode: RoomEditorMode }): Rea
             )}
           </Field>
 
-          <Field id="room-narration-script" label="Narration script">
+          <Field
+            id="room-narration-script"
+            label="Narration script"
+            required
+            {...(errors.narrationScript !== undefined ? { error: errors.narrationScript } : {})}
+          >
             {(control) => (
               <TextArea
                 {...control}
@@ -219,6 +293,13 @@ export function RoomEditorPage({ mode }: { readonly mode: RoomEditorMode }): Rea
             )}
           </Field>
         </div>
+
+        {formError !== null ? (
+          <StateBlock
+            size="inline"
+            state={{ kind: 'failure', title: 'Could not save this room', body: formError }}
+          />
+        ) : null}
 
         <section className={styles.itemSummaryPanel} aria-label="Item summary">
           <h2 className="text-subtitle">Item summary</h2>
@@ -247,15 +328,17 @@ export function RoomEditorPage({ mode }: { readonly mode: RoomEditorMode }): Rea
       <div className={styles.stickySaveBar} role="region" aria-label="Room editor actions">
         <p className={`text-caption ${styles.dirtyText}`}>{dirty ? 'Unsaved changes' : 'All changes saved'}</p>
         <div className={styles.saveActions}>
-          <Button tone="secondary" onClick={attemptDiscard}>
+          <Button tone="secondary" onClick={attemptDiscard} disabled={saving}>
             Discard
           </Button>
           {mode === 'edit' ? (
-            <Button tone="danger" onClick={() => setDeleteModalOpen(true)}>
+            <Button tone="danger" onClick={() => setDeleteModalOpen(true)} disabled={saving}>
               Delete room
             </Button>
           ) : null}
-          <Button onClick={commitSave}>Save room</Button>
+          <Button onClick={() => void commitSave()} disabled={saving}>
+            {saving ? 'Saving…' : 'Save room'}
+          </Button>
         </div>
       </div>
 
@@ -285,11 +368,22 @@ export function RoomEditorPage({ mode }: { readonly mode: RoomEditorMode }): Rea
         open={deleteModalOpen}
         title="Delete room?"
         entityName={room?.title ?? 'Room'}
-        consequence="and all items in it will be removed from fixtures."
+        consequence="and every item in it will be permanently deleted."
         confirmLabel="Delete room"
         tone="danger"
         onCancel={() => setDeleteModalOpen(false)}
-        onConfirm={attemptDelete}
+        onConfirm={() => void runDelete(false)}
+      />
+
+      <ConfirmDialog
+        open={forceDeleteOpen}
+        title="Another room points to this one"
+        entityName={room?.title ?? 'Room'}
+        consequence="is the next room in another room's sequence. Deleting it will clear that link, leaving the earlier room ending the tour."
+        confirmLabel="Delete and clear the link"
+        tone="danger"
+        onCancel={() => setForceDeleteOpen(false)}
+        onConfirm={() => void runDelete(true)}
       />
     </div>
   )
