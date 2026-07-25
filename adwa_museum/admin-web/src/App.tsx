@@ -11,18 +11,21 @@ import {
   type SVGProps,
 } from 'react'
 import {
-  BrowserRouter,
+  Link,
   NavLink,
   Navigate,
   Outlet,
   Route,
-  Routes,
+  RouterProvider,
+  createBrowserRouter,
+  createRoutesFromElements,
   useLocation,
   useNavigate,
   useParams,
+  useRouteError,
 } from 'react-router-dom'
 
-import { Button, Field, Select, TextInput, ToastProvider } from './kit/index.ts'
+import { Button, Field, TextInput, ToastProvider } from './kit/index.ts'
 import { ItemEditorPage } from './app/items/ItemEditorPage.tsx'
 import { RoomItemsListPage } from './app/items/RoomItemsListPage.tsx'
 import { NarrationPage } from './app/narration/NarrationPage.tsx'
@@ -66,18 +69,27 @@ type AuthContextValue = {
   readonly signOut: () => void
 }
 
+type SignInSurface = {
+  readonly idPrefix: string
+  readonly plane: 'tenant' | 'control'
+  readonly role: Role
+  readonly eyebrow: string
+  readonly title: string
+  readonly intro: string
+  /**
+   * Shown for every rejected attempt so that a wrong role is indistinguishable
+   * from a wrong password, keeping each door silent about the other plane.
+   */
+  readonly failureMessage: string
+  readonly showMuseumDoorLink: boolean
+}
+
 type NavItemConfig = {
   readonly id: string
   readonly label: string
   readonly icon: ReactElement
   readonly suffix?: number
   readonly path: string
-}
-
-type RouteStub = {
-  readonly path: string
-  readonly title: string
-  readonly body: string
 }
 
 type ViewportMode = 'wide' | 'desktop' | 'drawer'
@@ -91,78 +103,96 @@ const DEMO_ACCOUNTS = [
   { email: 'operator@adwa.local', role: 'SYSTEM_ADMIN' },
 ] as const satisfies readonly { email: string; role: Role }[]
 
-const tenantRouteStubs: readonly RouteStub[] = [
-  {
-    path: 'overview',
-    title: 'Overview',
-    body: 'Phase 3 placeholder. Tenant overview content lands in Phase 4.',
-  },
-  {
-    path: 'rooms',
-    title: 'Rooms',
-    body: 'Phase 3 placeholder. Rooms table and editing arrive in Phase 5.',
-  },
-  {
-    path: 'rooms/new',
-    title: 'New room',
-    body: 'Phase 3 placeholder for room creation routing.',
-  },
-  {
-    path: 'rooms/:roomId',
-    title: 'Room detail',
-    body: 'Phase 3 placeholder for room detail routing.',
-  },
-  {
-    path: 'rooms/:roomId/items',
-    title: 'Room items',
-    body: 'Phase 3 placeholder for room-scoped items.',
-  },
-  {
-    path: 'rooms/:roomId/items/:itemId',
-    title: 'Item detail',
-    body: 'Phase 3 placeholder for item detail routing.',
-  },
-  {
-    path: 'narration',
-    title: 'Narration',
-    body: 'Phase 3 placeholder. Narration workflows arrive in Phase 6.',
-  },
-  {
-    path: 'team',
-    title: 'Team',
-    body: 'Phase 3 placeholder. Team management arrives in Phase 6.',
-  },
-  {
-    path: 'activity',
-    title: 'Activity',
-    body: 'Phase 3 placeholder. Activity feed arrives in Phase 6.',
-  },
-  {
-    path: 'settings/museum',
-    title: 'Settings · Museum',
-    body: 'Phase 3 placeholder for museum settings routing.',
-  },
-  {
-    path: 'settings/gate',
-    title: 'Settings · Gate',
-    body: 'Phase 3 placeholder for gate settings routing.',
-  },
-  {
-    path: 'settings/guide',
-    title: 'Settings · Guide',
-    body: 'Phase 3 placeholder for guide settings routing.',
-  },
-  {
-    path: 'settings/voice',
-    title: 'Settings · Voice',
-    body: 'Phase 3 placeholder for voice settings routing.',
-  },
-]
+const MUSEUM_SIGN_IN_PATH = '/sign-in'
+const OPERATOR_SIGN_IN_PATH = '/operator/sign-in'
+
+const museumSignInSurface: SignInSurface = {
+  idPrefix: 'museum-sign-in',
+  plane: 'tenant',
+  role: 'MUSEUM_ADMIN',
+  eyebrow: 'Adwa museum admin',
+  title: 'Museum sign in',
+  intro: 'Administrator access to your museum’s rooms, narration, team, and settings.',
+  failureMessage: 'Those credentials are not valid for museum administrator sign-in.',
+  showMuseumDoorLink: false,
+}
+
+const operatorSignInSurface: SignInSurface = {
+  idPrefix: 'operator-sign-in',
+  plane: 'control',
+  role: 'SYSTEM_ADMIN',
+  eyebrow: 'Adwa ops console',
+  title: 'Operator sign in',
+  intro: 'System administrator access to the museum fleet, health, spend, and audit trail.',
+  failureMessage: 'Those credentials are not valid for system administrator sign-in.',
+  showMuseumDoorLink: true,
+}
+
+/**
+ * Nesting here is load-bearing, not cosmetic. The authoring pages navigate with
+ * `..`, which climbs one *route* level rather than one URL segment, so a flat
+ * registration would send "back to rooms" to the tenant root instead.
+ *
+ * Rendered under both `/app` and `/operator/tenant/:museumId`.
+ */
+function tenantRouteTree(): ReactElement {
+  return (
+    <>
+      <Route index element={<Navigate to="overview" replace />} />
+      <Route path="overview" element={<TenantOverviewPage />} />
+
+      <Route path="rooms">
+        <Route index element={<RoomsListPage />} />
+        <Route path="new" element={<RoomEditorPage mode="create" />} />
+        <Route path=":roomId">
+          <Route index element={<RoomEditorPage mode="edit" />} />
+          <Route path="items">
+            <Route index element={<RoomItemsListPage />} />
+            <Route path=":itemId" element={<ItemEditorPage />} />
+          </Route>
+        </Route>
+      </Route>
+
+      <Route path="narration" element={<NarrationPage />} />
+      <Route path="team" element={<TeamPage />} />
+      <Route path="activity" element={<ActivityPage />} />
+
+      <Route path="settings">
+        <Route index element={<Navigate to="museum" replace />} />
+        <Route path="museum" element={<MuseumSettingsPage />} />
+        <Route path="gate" element={<GateSettingsPage />} />
+        <Route path="guide" element={<GuideSettingsPage />} />
+        <Route path="voice" element={<VoiceSettingsPage />} />
+      </Route>
+    </>
+  )
+}
 
 const authContext = createContext<AuthContextValue | null>(null)
 
 function getLandingPath(role: Role): string {
   return role === 'SYSTEM_ADMIN' ? '/operator/fleet' : '/app/overview'
+}
+
+function getLandingLabel(role: Role): string {
+  return role === 'SYSTEM_ADMIN' ? 'Continue to fleet' : 'Continue to dashboard'
+}
+
+function getSignInPathForRole(role: Role): string {
+  return role === 'SYSTEM_ADMIN' ? OPERATOR_SIGN_IN_PATH : MUSEUM_SIGN_IN_PATH
+}
+
+function getSignInPathForLocation(pathname: string): string {
+  const isControlPlane = pathname === '/operator' || pathname.startsWith('/operator/')
+  return isControlPlane ? OPERATOR_SIGN_IN_PATH : MUSEUM_SIGN_IN_PATH
+}
+
+function getDemoEmail(role: Role): string {
+  return DEMO_ACCOUNTS.find((candidate) => candidate.role === role)?.email ?? ''
+}
+
+function formatRole(role: Role): string {
+  return role === 'SYSTEM_ADMIN' ? 'system administrator' : 'museum administrator'
 }
 
 function readSession(): Session | null {
@@ -264,60 +294,31 @@ function useAuth(): AuthContextValue {
   return context
 }
 
-function AppRouter(): ReactElement {
-  function renderTenantRoute(stub: RouteStub): ReactElement {
-    if (stub.path === 'overview') return <TenantOverviewPage />
-    if (stub.path === 'rooms') return <RoomsListPage />
-    if (stub.path === 'rooms/new') return <RoomEditorPage mode="create" />
-    if (stub.path === 'rooms/:roomId') return <RoomEditorPage mode="edit" />
-    if (stub.path === 'rooms/:roomId/items') return <RoomItemsListPage />
-    if (stub.path === 'rooms/:roomId/items/:itemId') return <ItemEditorPage />
-    if (stub.path === 'narration') return <NarrationPage />
-    if (stub.path === 'team') return <TeamPage />
-    if (stub.path === 'activity') return <ActivityPage />
-    if (stub.path === 'settings/museum') return <MuseumSettingsPage />
-    if (stub.path === 'settings/gate') return <GateSettingsPage />
-    if (stub.path === 'settings/guide') return <GuideSettingsPage />
-    if (stub.path === 'settings/voice') return <VoiceSettingsPage />
-    return <PlaceholderPage title={stub.title} body={stub.body} />
-  }
-
-  return (
-    <Routes>
+/**
+ * A data router (rather than <BrowserRouter>) is required: the editors' unsaved
+ * changes guard uses useBlocker, which only exists on a data router.
+ */
+const appRouter = createBrowserRouter(
+  createRoutesFromElements(
+    <Route errorElement={<RouteErrorPage />}>
       <Route path="/" element={<RootRoute />} />
-      <Route path="/sign-in" element={<SignInPage />} />
-      <Route path="/sign-out" element={<SignOutRoute />} />
+      <Route path={MUSEUM_SIGN_IN_PATH} element={<MuseumSignInPage />} />
+      <Route path="/sign-out" element={<SignOutRoute surface={museumSignInSurface} />} />
+      <Route path={OPERATOR_SIGN_IN_PATH} element={<OperatorSignInPage />} />
+      <Route path="/operator/sign-out" element={<SignOutRoute surface={operatorSignInSurface} />} />
       <Route path="/dev/tokens" element={<TokenHarnessPage />} />
 
       <Route element={<RequireAuth />}>
         <Route element={<FleetStoreBoundary />}>
           <Route path="/app" element={<TenantShell scopedMuseumId={null} />}>
-            <Route index element={<Navigate to="overview" replace />} />
-            {tenantRouteStubs.map((stub) => (
-              <Route key={`tenant-${stub.path}`} path={stub.path} element={renderTenantRoute(stub)} />
-            ))}
+            {tenantRouteTree()}
             <Route path="*" element={<NotFoundPage />} />
           </Route>
 
           <Route path="/operator" element={<OperatorRoleGuard />}>
             <Route path="tenant/:museumId" element={<TenantShell scopedMuseumId="fromRoute" />}>
-              <Route index element={<Navigate to="overview" replace />} />
-              {tenantRouteStubs.map((stub) => (
-                <Route
-                  key={`scoped-tenant-${stub.path}`}
-                  path={stub.path}
-                  element={renderTenantRoute(stub)}
-                />
-              ))}
-              <Route
-                path="*"
-                element={
-                  <PlaceholderPage
-                    title="Scoped tenant route"
-                    body="Phase 3 placeholder under /operator/tenant/:museumId/*."
-                  />
-                }
-              />
+              {tenantRouteTree()}
+              <Route path="*" element={<NotFoundPage />} />
             </Route>
 
             <Route element={<OperatorShell />}>
@@ -344,13 +345,13 @@ function AppRouter(): ReactElement {
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />
-    </Routes>
-  )
-}
+    </Route>,
+  ),
+)
 
 function RootRoute(): ReactElement {
   const { session } = useAuth()
-  if (session === null) return <Navigate to="/sign-in" replace />
+  if (session === null) return <Navigate to={MUSEUM_SIGN_IN_PATH} replace />
   return <Navigate to={getLandingPath(session.role)} replace />
 }
 
@@ -359,7 +360,13 @@ function RequireAuth(): ReactElement {
   const location = useLocation()
 
   if (session === null) {
-    return <Navigate to="/sign-in" replace state={{ from: location.pathname }} />
+    return (
+      <Navigate
+        to={getSignInPathForLocation(location.pathname)}
+        replace
+        state={{ from: location.pathname }}
+      />
+    )
   }
   return <Outlet />
 }
@@ -378,7 +385,7 @@ function OperatorRoleGuard(): ReactElement {
   return <Outlet />
 }
 
-function SignOutRoute(): ReactElement {
+function SignOutRoute({ surface }: { surface: SignInSurface }): ReactElement {
   const { session, signOut } = useAuth()
 
   useLayoutEffect(() => {
@@ -388,47 +395,59 @@ function SignOutRoute(): ReactElement {
   }, [session, signOut])
 
   if (session !== null) {
-    return <div className={styles.signInPage} data-plane="tenant" aria-hidden="true" />
+    return <div className={styles.signInPage} data-plane={surface.plane} aria-hidden="true" />
   }
 
-  return <Navigate to="/sign-in" replace />
+  return <Navigate to={getSignInPathForRole(surface.role)} replace />
 }
 
-function SignInPage(): ReactElement {
+function MuseumSignInPage(): ReactElement {
+  return <SignInPanel surface={museumSignInSurface} />
+}
+
+function OperatorSignInPage(): ReactElement {
+  const { session } = useAuth()
+
+  // Same non-disclosure rule as the rest of /operator: a museum administrator
+  // must not learn that an operator door exists at this address.
+  if (session?.role === 'MUSEUM_ADMIN') return <NotFoundPage />
+
+  return <SignInPanel surface={operatorSignInSurface} />
+}
+
+function SignInPanel({ surface }: { surface: SignInSurface }): ReactElement {
   const { session, signIn, signOut } = useAuth()
   const navigate = useNavigate()
 
-  const [email, setEmail] = useState<string>(DEMO_ACCOUNTS[0].email)
+  const [email, setEmail] = useState<string>(() => getDemoEmail(surface.role))
   const [password, setPassword] = useState(DEMO_PASSWORD)
-  const [role, setRole] = useState<Role>('MUSEUM_ADMIN')
   const [error, setError] = useState<string | null>(null)
+
+  const header = (
+    <div className={styles.signInTitleRow}>
+      <span className={styles.brandMark} aria-hidden="true">
+        A
+      </span>
+      <p className={`column-header ${styles.muted}`}>{surface.eyebrow}</p>
+    </div>
+  )
 
   if (session !== null) {
     return (
-      <section className={styles.signInPage} data-plane="tenant">
+      <section className={styles.signInPage} data-plane={surface.plane}>
         <div className={styles.signInPanel}>
           <header className={styles.signInHeader}>
-            <div className={styles.signInTitleRow}>
-              <span className={styles.brandMark} aria-hidden="true">
-                A
-              </span>
-              <p className={`column-header ${styles.muted}`}>Adwa admin web</p>
-            </div>
+            {header}
             <h1 className="text-title">Already signed in</h1>
             <p className={`text-body ${styles.muted}`}>
-              You are signed in as <strong>{session.email}</strong> ({session.role.replace('_', ' ').toLowerCase()}).
+              You are signed in as <strong>{session.email}</strong> ({formatRole(session.role)}).
             </p>
           </header>
           <div className={styles.roleButtons}>
             <Button onClick={() => navigate(getLandingPath(session.role), { replace: true })}>
-              Continue to dashboard
+              {getLandingLabel(session.role)}
             </Button>
-            <Button
-              tone="secondary"
-              onClick={() => {
-                signOut()
-              }}
-            >
+            <Button tone="secondary" onClick={signOut}>
               Sign out and switch account
             </Button>
           </div>
@@ -437,67 +456,27 @@ function SignInPage(): ReactElement {
     )
   }
 
-  function applyFixture(nextRole: Role): void {
-    const account = DEMO_ACCOUNTS.find((candidate) => candidate.role === nextRole)
-    if (account !== undefined) {
-      setRole(nextRole)
-      setEmail(account.email)
-      setPassword(DEMO_PASSWORD)
-      setError(null)
-    }
-  }
-
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
-    const result = signIn({ email, password, role })
+    const result = signIn({ email, password, role: surface.role })
     if (result.ok) {
-      navigate(getLandingPath(role), { replace: true })
+      navigate(getLandingPath(surface.role), { replace: true })
       return
     }
-    setError(result.message)
+    setError(surface.failureMessage)
   }
 
   return (
-    <section className={styles.signInPage} data-plane="tenant">
+    <section className={styles.signInPage} data-plane={surface.plane}>
       <form className={styles.signInPanel} onSubmit={handleSubmit}>
         <header className={styles.signInHeader}>
-          <div className={styles.signInTitleRow}>
-            <span className={styles.brandMark} aria-hidden="true">
-              A
-            </span>
-            <p className={`column-header ${styles.muted}`}>Adwa admin web</p>
-          </div>
-          <h1 className="text-title">Sign in</h1>
-          <p className={`text-body ${styles.muted}`}>
-            Use the demo credentials below. Password for both roles: <strong>{DEMO_PASSWORD}</strong>
-          </p>
+          {header}
+          <h1 className="text-title">{surface.title}</h1>
+          <p className={`text-body ${styles.muted}`}>{surface.intro}</p>
         </header>
 
-        <div className={styles.roleButtons}>
-          <Button tone="secondary" onClick={() => applyFixture('MUSEUM_ADMIN')}>
-            Use museum admin
-          </Button>
-          <Button tone="secondary" onClick={() => applyFixture('SYSTEM_ADMIN')}>
-            Use system admin
-          </Button>
-        </div>
-
         <div className={styles.fieldStack}>
-          <Field id="sign-in-role" label="Role" required>
-            {(control) => (
-              <Select
-                {...control}
-                value={role}
-                onChange={(nextValue) => setRole(nextValue as Role)}
-                options={[
-                  { value: 'MUSEUM_ADMIN', label: 'Museum admin' },
-                  { value: 'SYSTEM_ADMIN', label: 'System admin' },
-                ]}
-              />
-            )}
-          </Field>
-
-          <Field id="sign-in-email" label="Email" required>
+          <Field id={`${surface.idPrefix}-email`} label="Email" required>
             {(control) => (
               <TextInput
                 {...control}
@@ -510,7 +489,7 @@ function SignInPage(): ReactElement {
             )}
           </Field>
 
-          <Field id="sign-in-password" label="Password" required>
+          <Field id={`${surface.idPrefix}-password`} label="Password" required>
             {(control) => (
               <TextInput
                 {...control}
@@ -530,6 +509,17 @@ function SignInPage(): ReactElement {
         ) : null}
 
         <Button type="submit">Continue</Button>
+
+        <p className={`text-caption ${styles.muted}`}>
+          Demo account <strong>{getDemoEmail(surface.role)}</strong> with password{' '}
+          <strong>{DEMO_PASSWORD}</strong>.
+        </p>
+
+        {surface.showMuseumDoorLink ? (
+          <Link className={`text-caption ${styles.signInAltDoor}`} to={MUSEUM_SIGN_IN_PATH}>
+            Museum administrator sign-in
+          </Link>
+        ) : null}
       </form>
     </section>
   )
@@ -554,6 +544,26 @@ function NotFoundPage(): ReactElement {
         <p className="text-body">
           This route does not exist in the current admin surface. Use the sidebar or sign in again.
         </p>
+      </section>
+    </div>
+  )
+}
+
+function RouteErrorPage(): ReactElement {
+  const error = useRouteError()
+  const detail = error instanceof Error ? error.message : String(error)
+
+  return (
+    <div className={styles.notFound} data-plane="tenant">
+      <section className={`${styles.placeholderCard} ${styles.notFoundCard}`}>
+        <h1 className="text-title">Something went wrong on this screen</h1>
+        <p className="text-body">
+          The rest of the console is still available. Go back to your dashboard and try again.
+        </p>
+        <p className={`text-caption ${styles.errorText}`}>{detail}</p>
+        <Button tone="secondary" onClick={() => window.location.assign('/')}>
+          Back to dashboard
+        </Button>
       </section>
     </div>
   )
@@ -595,7 +605,7 @@ function OperatorShell(): ReactElement {
     }
   }, [location.pathname, viewport])
 
-  if (session === null) return <Navigate to="/sign-in" replace />
+  if (session === null) return <Navigate to={OPERATOR_SIGN_IN_PATH} replace />
 
   const isDrawer = viewport === 'drawer'
   const showCollapsedRail = !isDrawer && collapsed
@@ -620,8 +630,9 @@ function OperatorShell(): ReactElement {
   }
 
   function handleSignOut(): void {
+    const signInPath = session === null ? MUSEUM_SIGN_IN_PATH : getSignInPathForRole(session.role)
     signOut()
-    navigate('/sign-in', { replace: true })
+    navigate(signInPath, { replace: true })
   }
 
   const sidebarContent = (
@@ -838,7 +849,11 @@ function TenantShell({
     [isScoped, museumId, museumName, operatorEmail],
   )
 
-  if (session === null) return <Navigate to="/sign-in" replace />
+  if (session === null) {
+    return (
+      <Navigate to={museumId === null ? MUSEUM_SIGN_IN_PATH : OPERATOR_SIGN_IN_PATH} replace />
+    )
+  }
 
   const base = museumId === null ? '/app' : `/operator/tenant/${museumId}`
   const isDrawer = viewport === 'drawer'
@@ -867,8 +882,9 @@ function TenantShell({
   }
 
   function handleSignOut(): void {
+    const signInPath = session === null ? MUSEUM_SIGN_IN_PATH : getSignInPathForRole(session.role)
     signOut()
-    navigate('/sign-in', { replace: true })
+    navigate(signInPath, { replace: true })
   }
 
   const sidebarContent = (
@@ -1258,9 +1274,7 @@ function App(): ReactElement {
     <div className={styles.appRoot}>
       <AuthProvider>
         <ToastProvider>
-          <BrowserRouter>
-            <AppRouter />
-          </BrowserRouter>
+          <RouterProvider router={appRouter} />
         </ToastProvider>
       </AuthProvider>
     </div>

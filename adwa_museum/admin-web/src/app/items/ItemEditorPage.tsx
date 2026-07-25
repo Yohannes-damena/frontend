@@ -81,6 +81,7 @@ export function ItemEditorPage(): ReactElement {
         return
       }
       show({ tone: 'success', message: 'Item created.' })
+      unsavedGuard.allowNextNavigation()
       navigate(`../${created.itemId}`, { replace: true })
       return
     }
@@ -104,6 +105,7 @@ export function ItemEditorPage(): ReactElement {
     if (existingItem === undefined) return
     deleteItem(existingItem.id)
     show({ tone: 'success', message: 'Item deleted.' })
+    unsavedGuard.allowNextNavigation()
     navigate('..', { replace: true })
   }
 
