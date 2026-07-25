@@ -60,7 +60,16 @@ coverage/
 .env
 .env.*
 !.env.example
-Adwa_backend_implementation.md
+
+# Admin web (Vite / Node) build artifacts
+admin-web/node_modules/
+admin-web/dist/
+admin-web/dist-ssr/
+admin-web/*.local
+admin-web/.vite/
+
+# TypeScript build info
+*.tsbuildinfo
 
 # Stitch HTML exports (source reference only)
 stitch_museum_guide_home/
