@@ -1,5 +1,5 @@
 name: adwa_museum
-description: Heritage Gallery — Museum Tour Guide App
+description: Museum Guide — QR-powered AI tour app
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -7,9 +7,19 @@ environment:
   sdk: ^3.7.0
 
 dependencies:
+  cached_network_image: ^3.4.1
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   google_fonts: ^6.2.1
+  http: ^1.6.0
+  just_audio: ^0.10.5
+  mobile_scanner: ^7.4.0
+  qr_flutter: ^4.1.0
+  rxdart: ^0.28.0
+  shared_preferences: ^2.5.5
+  speech_to_text: ^7.4.0
 
 dev_dependencies:
   flutter_test:
@@ -18,3 +28,14 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/audio/guide_answer_placeholder.mp3
+    - assets/images/image.png
+    - assets/images/room1/hero.png
+    - assets/images/room2/hero.png
+    - assets/images/room2/item.png
+    - assets/images/room3/hero.png
+    - assets/images/items/
+    - assets/images/outerimages/adwa.png
+    - assets/images/outerimages/6killo.png
+    - assets/images/outerimages/Lovuran.png

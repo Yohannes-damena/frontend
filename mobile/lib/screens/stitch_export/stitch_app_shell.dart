@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 
-import 'stitch_donate_screen.dart';
+import '../../services/tour_session.dart';
 import 'stitch_museum_hub_screen.dart';
-import 'stitch_shop_screen.dart';
+import 'stitch_scanner_screen.dart';
 import 'stitch_theme.dart';
-import 'stitch_ticket_validation_screen.dart';
 
-/// Main post-entry shell: Explore, Shop, Scan, Donate.
+/// Main post-entry shell: Explore + Scan.
 class StitchAppShell extends StatefulWidget {
   const StitchAppShell({super.key, this.initialIndex = 0});
 
@@ -19,24 +18,24 @@ class StitchAppShell extends StatefulWidget {
 class _StitchAppShellState extends State<StitchAppShell> {
   late int _currentIndex;
 
+  static const int _tabCount = 2;
+
   @override
   void initState() {
     super.initState();
-    _currentIndex = widget.initialIndex;
+    _currentIndex = widget.initialIndex.clamp(0, _tabCount - 1);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: const <Widget>[
-          StitchMuseumHubScreen(showBottomNav: false),
-          StitchShopScreen(showBottomNav: false),
-          StitchTicketValidationScreen(showBottomNav: false),
-          StitchDonateScreen(showBottomNav: false),
-        ],
-      ),
+      body: _currentIndex == 0
+          ? StitchMuseumHubScreen(
+              key: ValueKey<String>(TourSession.tourStartRoomId ?? 'no-tour'),
+              showBottomNav: false,
+              onSwitchToScan: () => setState(() => _currentIndex = 1),
+            )
+          : const StitchScannerScreen(showBottomNav: false),
       bottomNavigationBar: StitchBottomNav(
         activeIndex: _currentIndex,
         onTap: (int index) => setState(() => _currentIndex = index),
