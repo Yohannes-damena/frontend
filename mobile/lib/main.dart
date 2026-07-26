@@ -1,18 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'models/chat_args.dart';
+import 'models/item_detail_args.dart';
+import 'models/room.dart';
+import 'models/ticket_validation_args.dart';
 import 'screens/stitch_export/stitch_app_shell.dart';
-import 'screens/stitch_export/stitch_narration_detail_screen.dart';
+import 'screens/stitch_export/stitch_chat_screen.dart';
+import 'screens/stitch_export/stitch_debug_qr_screen.dart';
+import 'screens/stitch_export/stitch_item_detail_screen.dart';
+import 'screens/stitch_export/stitch_room_screen.dart';
 import 'screens/stitch_export/stitch_routes.dart';
-import 'screens/stitch_export/stitch_shop_empty_bag_screen.dart';
-import 'screens/stitch_export/stitch_shop_product_detail_screen.dart';
-import 'screens/stitch_export/stitch_ticket_error_screen.dart';
-import 'screens/stitch_export/stitch_ticket_validated_screen.dart';
+import 'screens/stitch_export/stitch_settings_screen.dart';
 import 'screens/stitch_export/stitch_ticket_validation_screen.dart';
+import 'screens/stitch_export/stitch_theme.dart';
 import 'screens/stitch_export/stitch_welcome_screen.dart';
+import 'services/api_service.dart';
+import 'services/locale_controller.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await LocaleController.instance.load();
 
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -22,24 +31,71 @@ void main() {
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
+      statusBarIconBrightness: Brightness.dark,
+      statusBarBrightness: Brightness.light,
     ),
   );
 
-  runApp(const HeritageGalleryApp());
+  runApp(const MuseumGuideApp());
 }
 
-class HeritageGalleryApp extends StatelessWidget {
-  const HeritageGalleryApp({super.key});
+class MuseumGuideApp extends StatelessWidget {
+  const MuseumGuideApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Heritage Gallery',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(useMaterial3: true),
-      initialRoute: StitchRoutes.welcome,
-      onGenerateRoute: _onGenerateRoute,
+    return ListenableBuilder(
+      listenable: LocaleController.instance,
+      builder: (BuildContext context, _) {
+        final Locale locale = LocaleController.instance.locale;
+        return MaterialApp(
+          title: 'Museum Guide',
+          debugShowCheckedModeBanner: false,
+          locale: locale,
+          supportedLocales: const <Locale>[
+            Locale('en'),
+            Locale('am'),
+          ],
+          // Our own strings come from AppStrings, but Material's built-in
+          // widgets still need localizations of their own, and the framework
+          // asserts rather than falling back when a declared locale has none.
+          localizationsDelegates: const <LocalizationsDelegate<Object>>[
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          localeResolutionCallback: (Locale? device, Iterable<Locale> supported) {
+            for (final Locale candidate in supported) {
+              if (candidate.languageCode == locale.languageCode) {
+                return locale;
+              }
+            }
+            return const Locale('en');
+          },
+          theme: ThemeData(
+            useMaterial3: true,
+            brightness: Brightness.light,
+            scaffoldBackgroundColor: StitchTheme.darkText,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: StitchTheme.adwaGold,
+              brightness: Brightness.light,
+              surface: StitchTheme.panel,
+            ),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: StitchTheme.darkText,
+              foregroundColor: StitchTheme.ink,
+              surfaceTintColor: Colors.transparent,
+            ),
+            snackBarTheme: const SnackBarThemeData(
+              backgroundColor: StitchTheme.ink,
+              contentTextStyle: TextStyle(color: StitchTheme.heroText),
+              behavior: SnackBarBehavior.floating,
+            ),
+          ),
+          initialRoute: StitchRoutes.welcome,
+          onGenerateRoute: _onGenerateRoute,
+        );
+      },
     );
   }
 
@@ -51,16 +107,17 @@ class HeritageGalleryApp extends StatelessWidget {
           builder: (_) => const StitchWelcomeScreen(),
         );
       case StitchRoutes.validate:
-        return MaterialPageRoute<void>(
+        final TicketValidationArgs? ticketArgs =
+            StitchRoutes.ticketArgsFrom(settings.arguments);
+        if (ticketArgs == null) {
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => const StitchWelcomeScreen(),
+          );
+        }
+        return MaterialPageRoute<bool>(
           settings: settings,
-          builder: (_) => const StitchTicketValidationScreen(),
-        );
-      case StitchRoutes.validated:
-        return StitchRoutes.fadeRoute(const StitchTicketValidatedScreen());
-      case StitchRoutes.error:
-        return MaterialPageRoute<void>(
-          settings: settings,
-          builder: (_) => const StitchTicketErrorScreen(),
+          builder: (_) => StitchTicketValidationScreen(args: ticketArgs),
         );
       case StitchRoutes.home:
         final int initialIndex =
@@ -69,20 +126,60 @@ class HeritageGalleryApp extends StatelessWidget {
           settings: settings,
           builder: (_) => StitchAppShell(initialIndex: initialIndex),
         );
-      case StitchRoutes.narration:
+      case StitchRoutes.room:
+        final Room? room = StitchRoutes.roomFromArgs(settings.arguments);
+        if (room == null) {
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => const StitchWelcomeScreen(),
+          );
+        }
         return MaterialPageRoute<void>(
           settings: settings,
-          builder: (_) => const StitchNarrationDetailScreen(),
+          builder: (_) => StitchRoomScreen(room: room),
         );
-      case StitchRoutes.shopProduct:
-        return MaterialPageRoute<void>(
-          settings: settings,
-          builder: (_) => const StitchShopProductDetailScreen(),
+      case StitchRoutes.item:
+        final ItemDetailArgs? args = StitchRoutes.itemArgsFrom(
+          settings.arguments,
         );
-      case StitchRoutes.shopEmptyBag:
+        if (args == null) {
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => const StitchWelcomeScreen(),
+          );
+        }
         return MaterialPageRoute<void>(
           settings: settings,
-          builder: (_) => const StitchShopEmptyBagScreen(),
+          builder: (_) => StitchItemDetailScreen.fromArgs(args),
+        );
+      case StitchRoutes.chat:
+        final ChatArgs? args = StitchRoutes.chatArgsFrom(settings.arguments);
+        if (args == null || args.waypointId.isEmpty) {
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => const StitchWelcomeScreen(),
+          );
+        }
+        return MaterialPageRoute<void>(
+          settings: settings,
+          builder: (_) => StitchChatScreen(args: args),
+        );
+      case StitchRoutes.settings:
+        return MaterialPageRoute<void>(
+          settings: settings,
+          builder: (_) => const StitchSettingsScreen(),
+        );
+      case StitchRoutes.debugQr:
+        // Completely unreachable in release builds.
+        if (!ApiService.enableDebugTools) {
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => const StitchWelcomeScreen(),
+          );
+        }
+        return MaterialPageRoute<void>(
+          settings: settings,
+          builder: (_) => const StitchDebugQrScreen(),
         );
       default:
         return MaterialPageRoute<void>(

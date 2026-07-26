@@ -1,0 +1,202 @@
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Narration &amp; Transcript - Golden Tide</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900&amp;family=Manrope:wght@200..800&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">tailwind.config = {darkMode: "class", theme: {extend: {colors: {"on-primary-fixed": "#281800", "on-surface-variant": "#cec5bd", "on-tertiary": "#680017", "on-primary-container": "#a57316", "primary-fixed": "#ffddb0", "on-error-container": "#ffdad6", "primary-container": "#1a0e00", "on-secondary-fixed-variant": "#683940", "surface-bright": "#3c3936", "on-error": "#690005", error: "#ffb4ab", "secondary-fixed": "#ffd9dd", "on-primary-fixed-variant": "#614000", "outline-variant": "#4c4640", "secondary-container": "#6b3b42", background: "#151311", "surface-container-highest": "#373432", "on-primary": "#442c00", "tertiary-fixed": "#ffdada", "tertiary-fixed-dim": "#ffb3b4", "on-secondary-container": "#e8a7af", tertiary: "#ffb3b4", primary: "#f9bc5b", "surface-container": "#221f1d", "primary-fixed-dim": "#f9bc5b", "on-background": "#e8e1dd", "on-secondary-fixed": "#340f16", "inverse-primary": "#805600", "inverse-surface": "#e8e1dd", "on-surface": "#e8e1dd", "on-secondary": "#4e232a", "inverse-on-surface": "#33302d", "surface-tint": "#f9bc5b", outline: "#978f88", "on-tertiary-container": "#d0525c", "secondary-fixed-dim": "#f7b5bd", "surface-container-high": "#2c2927", secondary: "#f7b5bd", surface: "#151311", "surface-container-lowest": "#100e0c", "tertiary-container": "#2b0005", "surface-variant": "#373432", "surface-container-low": "#1d1b19", "on-tertiary-fixed-variant": "#881c2b", "error-container": "#93000a", "surface-dim": "#151311", "on-tertiary-fixed": "#40000b"}, borderRadius: {DEFAULT: "1rem", lg: "2rem", xl: "3rem", full: "9999px"}, spacing: {gutter: "16px", "container-padding": "24px", "card-gap": "20px", unit: "8"}, fontFamily: {"label-caps": ["Manrope"], "display-lg": ["Bodoni Moda"], "headline-lg-mobile": ["Bodoni Moda"], "headline-lg": ["Bodoni Moda"], "price-numeric": ["Manrope"], "headline-md": ["Bodoni Moda"], "body-lg": ["Manrope"], "body-md": ["Manrope"], headline: ["Bodoni Moda"], display: ["Bodoni Moda"], body: ["Manrope"], label: ["Manrope"]}, fontSize: {"label-caps": ["12px", {lineHeight: "16px", letterSpacing: "0.1em", fontWeight: "600"}], "display-lg": ["48px", {lineHeight: "56px", letterSpacing: "-0.02em", fontWeight: "600"}], "headline-lg-mobile": ["28px", {lineHeight: "34px", fontWeight: "500"}], "headline-lg": ["32px", {lineHeight: "40px", fontWeight: "500"}], "price-numeric": ["20px", {lineHeight: "24px", fontWeight: "500"}], "headline-md": ["24px", {lineHeight: "32px", fontWeight: "500"}], "body-lg": ["18px", {lineHeight: "28px", fontWeight: "400"}], "body-md": ["16px", {lineHeight: "24px", fontWeight: "400"}]}}}};</script>
+<style>
+        body {
+            background-color: theme('colors.background');
+            color: theme('colors.on-background');
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .hero-gradient {
+            background: linear-gradient(to bottom, rgba(20, 19, 19, 0) 0%, rgba(20, 19, 19, 0.8) 50%, rgba(20, 19, 19, 1) 100%);
+        }
+
+        .gold-accent {
+            color: #d4af37; /* Legacy gold if needed, but primary is preferred from theme */
+        }
+        
+        .glass-panel {
+            background: rgba(43, 42, 41, 0.6);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(207, 197, 188, 0.1);
+        }
+
+        .frame-shadow {
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5), 0 10px 30px rgba(0,0,0,0.8);
+        }
+        
+        .waveform-bar {
+            width: 3px;
+            background-color: theme('colors.on-surface-variant');
+            border-radius: 9999px;
+            display: inline-block;
+            margin: 0 1px;
+            animation: pulse 1.5s infinite alternate ease-in-out;
+        }
+
+        @keyframes pulse {
+            0% { transform: scaleY(0.3); }
+            100% { transform: scaleY(1); }
+        }
+        
+        .w-1 { animation-delay: 0.1s; }
+        .w-2 { animation-delay: 0.3s; }
+        .w-3 { animation-delay: 0.5s; }
+        .w-4 { animation-delay: 0.2s; }
+        .w-5 { animation-delay: 0.4s; }
+        .w-6 { animation-delay: 0.6s; }
+        .w-7 { animation-delay: 0.1s; }
+        .w-8 { animation-delay: 0.5s; }
+        .w-9 { animation-delay: 0.2s; }
+        .w-10 { animation-delay: 0.4s; }
+        
+        .waveform-bar.active {
+            background-color: theme('colors.primary');
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="min-h-screen flex flex-col relative overflow-x-hidden">
+<!-- Top Navigation (Contextual Suppressed based on rules, but keeping the 'Back' intent header) -->
+<header class="fixed top-0 left-0 right-0 z-50 flex justify-between items-center w-full px-container-padding py-4 bg-transparent flat no shadows">
+<button class="w-10 h-10 rounded-full glass-panel flex items-center justify-center text-on-surface hover:opacity-80 transition-opacity">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">arrow_back</span>
+</button>
+<div class="text-headline-md font-headline-md tracking-widest text-on-surface uppercase text-center flex-1">
+            THE<br>GALLERY
+        </div>
+<button class="w-10 h-10 rounded-full glass-panel flex items-center justify-center text-on-surface hover:opacity-80 transition-opacity">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">more_horiz</span>
+</button>
+</header>
+<!-- Main Content -->
+<main class="flex-1 w-full max-w-3xl mx-auto pb-32">
+<!-- Artwork Hero Section -->
+<section class="relative w-full h-[530px] md:h-[618px] flex items-center justify-center pt-20 px-6">
+<!-- Background Image Blur for atmosphere -->
+<div class="absolute inset-0 bg-cover bg-center opacity-30 blur-2xl z-0" data-alt="A heavily blurred, abstract seascape in dark moody tones with golden highlights, evoking a sense of deep water and dramatic sunset lighting. The overall feel is premium and atmospheric." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBVfWvO3gDrbIGWFojXv_QEPPFqSBdYgWohArc4iMLU92kUkjU1DxxuITdKRrK7opfM5FgXY1jcb-zIc4o0XvL27O7IOc9waWculcdH4_BjFhRx6m_HH8kdkfmz8VUBTXXgOmJ3AtbXQ6w9dIFoixVxPbKD-_tHpWCumklwO6su3VBoCEn-RuhdC0gjCWcxyic8pgyAfMjberjN6GZF_cZvh4GAY5WbrejY-raDXW5e208qRo-wAPbaOw')"></div>
+<!-- The Artifact Frame -->
+<div class="relative z-10 w-full max-w-md aspect-[4/3] rounded-sm p-4 bg-gradient-to-br from-[#4a3b2c] to-[#2a2015] frame-shadow">
+<div class="w-full h-full border-4 border-[#8b6e4d] shadow-inner relative overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A masterfully painted, contemporary abstract seascape capturing the fleeting shimmer of golden light over a massive, turbulent ocean wave. The brushstrokes are dynamic and thick, blending deep emerald greens, dark indigos, and vibrant metallic golds. The painting is framed in a heavy, ornate golden frame typical of a high-end museum gallery." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDZntEY4cdfVBODI3Ur8TuHBN9uUu1tZ8fzafi64PcBDL3Qo_Rz0ASf1CJeGVWDZAogwc3M4xAGHNsq1IW3LIg-ugsBPC0nUk7SHhIWNAI70iWsyPGdz8Uk3RGMxo_B7p-TzxFptx9ufcpP17jG45FAwe5n3hXqR2VPERuiUtxxjYn2MW-w2zwy3JN4YM4k62YB4Nacv06lAzjFNzz1cCB2lY7haKOHaWl9UfIOLRfpLMJ70-IeX8Lr2g">
+</div>
+</div>
+<div class="absolute bottom-0 left-0 right-0 h-1/2 hero-gradient z-0 pointer-events-none"></div>
+</section>
+<!-- Details & Narration Section -->
+<section class="relative z-20 -mt-10 px-container-padding">
+<div class="glass-panel rounded-t-3xl p-6 md:p-8 pt-8">
+<!-- Title & Artist -->
+<div class="mb-6">
+<h1 class="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mb-2">Golden Tide</h1>
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span class="font-body-md text-body-md">Elena Marquez</span>
+<span class="w-1 h-1 rounded-full bg-on-surface-variant"></span>
+<span class="font-body-md text-body-md">1972</span>
+</div>
+</div>
+<!-- Description -->
+<p class="font-body-lg text-body-lg text-on-surface-variant mb-8 leading-relaxed">
+                    A contemporary abstract seascape capturing the fleeting shimmer of light over a wave. The artist's distinctive impasto technique creates a tactile surface that seems to move with the viewer.
+                </p>
+<!-- AI Guide Progress -->
+<div class="bg-surface-container-high rounded-xl p-5 mb-8 border border-outline-variant/30">
+<div class="flex justify-between items-end mb-4">
+<div>
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase block mb-1">AI Guide Progress</span>
+<span class="font-price-numeric text-price-numeric text-on-surface">Chapter 2: The Technique</span>
+</div>
+<div class="flex items-center gap-1 text-on-surface-variant">
+<span class="material-symbols-outlined text-[18px]">timer</span>
+<span class="font-price-numeric text-body-md">12:45</span>
+</div>
+</div>
+<!-- Progress Bar -->
+<div class="w-full h-1 bg-surface-variant rounded-full overflow-hidden relative mb-2">
+<div class="absolute top-0 left-0 h-full bg-primary rounded-full w-1/3"></div>
+</div>
+<div class="flex justify-between text-xs text-on-surface-variant/60 font-body-md">
+<span>0:00</span>
+<span>45:20</span>
+</div>
+</div>
+<!-- Live Narration Transcript Snippet -->
+<div class="mb-8">
+<div class="flex items-center gap-3 mb-4">
+<div class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-[16px]">record_voice_over</span>
+</div>
+<span class="font-body-md text-body-md text-on-surface font-semibold">Live Transcript</span>
+<div class="flex items-center gap-[2px] ml-auto h-4">
+<div class="waveform-bar active w-1 h-2"></div>
+<div class="waveform-bar active w-2 h-4"></div>
+<div class="waveform-bar active w-3 h-3"></div>
+<div class="waveform-bar active w-4 h-5"></div>
+<div class="waveform-bar active w-5 h-2"></div>
+<div class="waveform-bar w-6 h-3"></div>
+<div class="waveform-bar w-7 h-4"></div>
+<div class="waveform-bar w-8 h-2"></div>
+<div class="waveform-bar w-9 h-5"></div>
+<div class="waveform-bar w-10 h-3"></div>
+</div>
+</div>
+<div class="pl-11 pr-4 border-l-2 border-primary/30 ml-4 relative">
+<div class="absolute -left-[5px] top-1 w-2 h-2 rounded-full bg-primary"></div>
+<p class="font-body-md text-body-md text-on-surface-variant italic leading-relaxed">
+                            "...notice how the thick application of cadmium yellow in the upper right quadrant creates a physical texture that actually catches the gallery light, simulating the very sun it depicts..."
+                        </p>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Floating Action Bar (Repurposed for Asking Guide) -->
+<div class="fixed bottom-6 left-0 right-0 z-50 flex justify-center px-6 pointer-events-none">
+<div class="glass-panel w-full max-w-sm rounded-full p-2 flex items-center justify-between shadow-2xl pointer-events-auto border border-primary/20">
+<!-- Playback Controls -->
+<div class="flex items-center gap-2 pl-4">
+<button class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface hover:bg-white/10 transition-colors">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">replay_10</span>
+</button>
+<button class="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center text-primary hover:bg-surface-container-high transition-colors shadow-lg">
+<span class="material-symbols-outlined text-[28px]" style="font-variation-settings: 'FILL' 1;">pause</span>
+</button>
+</div>
+<!-- Ask Guide Button -->
+<button class="bg-primary text-on-primary font-body-md text-body-md font-semibold py-3 px-6 rounded-full flex items-center gap-2 hover:opacity-90 transition-opacity ml-2">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">mic</span>
+                Ask the Guide
+            </button>
+</div>
+</div>
+</body></html>

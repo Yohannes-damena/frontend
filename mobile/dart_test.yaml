@@ -1,0 +1,4 @@
+tags:
+  # Declared so the tag is not reported as unrecognised. The suite skips itself
+  # unless LIVE_ROOM_ID is defined, so a plain `flutter test` stays offline.
+  live:

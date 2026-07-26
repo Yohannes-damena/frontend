@@ -1,12 +1,23 @@
 import 'package:flutter/material.dart';
 
-import 'stitch_routes.dart';
+import '../../l10n/app_strings.dart';
+import '../../models/ticket_validation_args.dart';
+import '../../services/api_service.dart';
+import '../../services/ticket_access_store.dart';
+import '../../widgets/museum_network_image.dart';
 import 'stitch_theme.dart';
 
+/// One-time-per-museum entry gate via `POST /tickets/validate`.
+///
+/// Shown only when [TicketAccessStore] has no fresh grant for the room's museum
+/// scope. On success, pops `true` so the caller can open the pending room.
+///
+/// DESIGN_SYSTEM v2: solid panels only (no glass), gold only on the primary
+/// CTA, Adwa-focused copy — no gallery-template branding.
 class StitchTicketValidationScreen extends StatefulWidget {
-  const StitchTicketValidationScreen({super.key, this.showBottomNav = true});
+  const StitchTicketValidationScreen({super.key, required this.args});
 
-  final bool showBottomNav;
+  final TicketValidationArgs args;
 
   @override
   State<StitchTicketValidationScreen> createState() =>
@@ -15,190 +26,262 @@ class StitchTicketValidationScreen extends StatefulWidget {
 
 class _StitchTicketValidationScreenState
     extends State<StitchTicketValidationScreen> {
+  final ApiService _api = ApiService();
   final TextEditingController _ticketController = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
+
+  bool _submitting = false;
+  String? _errorMessage;
+
+  String get _waypointId => widget.args.continueTo.id;
 
   @override
   void dispose() {
     _ticketController.dispose();
+    _focusNode.dispose();
+    _api.dispose();
     super.dispose();
   }
 
-  void _submitTicket() {
-    StitchRoutes.submitTicket(
-      context,
-      _ticketController.text,
-      replaceOnSuccess: widget.showBottomNav,
-    );
+  Future<void> _validateTicket() async {
+    final AppStrings s = AppStrings.of(context);
+    final String code = _ticketController.text.trim();
+    if (code.isEmpty) {
+      setState(() {
+        _errorMessage = s.enterTicketCode;
+      });
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final result = await _api.validateTicket(
+        waypointId: _waypointId,
+        ticketCode: code,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      // Cache against the scope the server just reported, falling back to the
+      // one the waypoint carried, so the grant covers the whole museum.
+      final String scope = result.museumScope.trim().isNotEmpty
+          ? result.museumScope
+          : widget.args.continueTo.museumScope;
+
+      // Museum does not require tickets — skip permanently without writing a
+      // 24-hour validation timestamp.
+      if (!result.ticketRequired) {
+        await TicketAccessStore.markTicketNotRequired(scope);
+        if (!mounted) {
+          return;
+        }
+        Navigator.pop(context, true);
+        return;
+      }
+
+      if (result.valid) {
+        await TicketAccessStore.markValidated(scope);
+        if (!mounted) {
+          return;
+        }
+        Navigator.pop(context, true);
+        return;
+      }
+
+      setState(() {
+        _errorMessage = s.ticketInvalid;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorMessage = e.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorMessage = AppStrings.of(context).ticketValidateFailed;
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final AppStrings s = AppStrings.of(context);
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F0E6),
+      backgroundColor: StitchTheme.darkText,
+      appBar: AppBar(
+        backgroundColor: StitchTheme.darkText,
+        foregroundColor: StitchTheme.ink,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.pop(context, false),
+        ),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: <Widget>[
-                  const CircleAvatar(
-                    radius: 20,
-                    backgroundImage: NetworkImage(
-                      'https://lh3.googleusercontent.com/aida-public/AB6AXuBVUk-pRV2ru25WMXxS8nBn0CbWQu0hcF5Ov5F_57NYa9wDZAnB29W8k8wPqtYk1uL_pAuTaBmzKJGNIHNH24zUAfaop4Mz5-pPzm1ZeIHNIl2sZnIcLoOhioF1xzS6-Ny1zvtElHO7CF82_wuhyOcXlCM_pP5mt_E-fUZA_dxku_BB0LoD8l5SehSl-UD2EnBK0_bIcxloed-CD5y7gvIhg3rlQum7M8KgMQy_wmPjOfON7BV2gtY5NLVc5cQK0N1rsXXfrgaFPIn3',
-                    ),
-                  ),
-                  Text(
-                    'THE GALLERY',
-                    style: StitchTheme.headline(
-                      size: 24,
-                      weight: FontWeight.w500,
-                      color: StitchTheme.darkText,
-                      letterSpacing: 2,
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () {},
-                    icon: const Icon(Icons.near_me_outlined),
-                  ),
-                ],
+              Text(
+                s.entry,
+                textAlign: TextAlign.center,
+                style: StitchTheme.overline(size: 12, color: StitchTheme.muted),
               ),
               const SizedBox(height: 28),
-              Center(
-                child: Column(
-                  children: <Widget>[
-                    Text(
-                      'Validate Access',
-                      style: StitchTheme.headline(
-                        size: 42,
-                        color: StitchTheme.darkText,
-                        height: 1.0,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      'Present your digital or physical ticket for gallery entry.',
-                      textAlign: TextAlign.center,
-                      style: StitchTheme.body(
-                        size: 17,
-                        color: StitchTheme.darkText.withValues(alpha: 0.8),
-                      ),
-                    ),
-                  ],
+              Text(
+                s.validateTicketTitle,
+                textAlign: TextAlign.center,
+                style: StitchTheme.headline(
+                  size: 34,
+                  color: StitchTheme.parchment,
+                  height: 1.1,
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 12),
+              Text(
+                s.validateTicketBody,
+                textAlign: TextAlign.center,
+                style: StitchTheme.body(
+                  size: 16,
+                  color: StitchTheme.muted,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 32),
               Container(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(22),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEFE5CE),
-                  borderRadius: BorderRadius.circular(32),
-                  border: Border.all(color: const Color(0xFFE2D5BC)),
+                  color: StitchTheme.panel,
+                  borderRadius: BorderRadius.circular(20),
                 ),
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    Container(
-                      height: 280,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF0F0F0),
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border(
-                          top: BorderSide(
-                            color: StitchTheme.adwaGold,
-                            width: 3,
-                          ),
-                        ),
-                        boxShadow: const <BoxShadow>[
-                          BoxShadow(
-                            color: Color.fromRGBO(194, 146, 53, 0.4),
-                            blurRadius: 24,
-                            offset: Offset(0, -8),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: <Widget>[
-                          const Icon(Icons.qr_code_2, size: 72),
-                          const SizedBox(height: 12),
-                          Text(
-                            'AWAITING SCAN',
-                            style: StitchTheme.overline(
-                              size: 12,
-                              color: StitchTheme.darkText,
-                              letterSpacing: 2.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 28),
-                    Row(
-                      children: <Widget>[
-                        const Expanded(child: Divider()),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Text(
-                            'OR ENTER MANUALLY',
-                            style: StitchTheme.overline(
-                              size: 11,
-                              color: StitchTheme.darkText,
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: AspectRatio(
+                        aspectRatio: 16 / 10,
+                        child: MuseumNetworkImage(
+                          url:
+                              widget.args.continueTo.items.isNotEmpty
+                                  ? widget.args.continueTo.items.first.imageUrl
+                                  : 'assets/images/room1/hero.png',
+                          fit: BoxFit.cover,
+                          fallback: const ColoredBox(
+                            color: StitchTheme.obsidian,
+                            child: Center(
+                              child: Icon(
+                                Icons.account_balance_outlined,
+                                color: StitchTheme.muted,
+                                size: 48,
+                              ),
                             ),
                           ),
                         ),
-                        const Expanded(child: Divider()),
-                      ],
+                      ),
                     ),
-                    const SizedBox(height: 20),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'TICKET CODE',
-                        style: StitchTheme.overline(
-                          size: 11,
-                          color: StitchTheme.darkText,
-                        ),
+                    const SizedBox(height: 22),
+                    Text(
+                      s.ticketCode,
+                      style: StitchTheme.overline(
+                        size: 11,
+                        color: StitchTheme.muted,
                       ),
                     ),
                     const SizedBox(height: 8),
                     TextField(
                       controller: _ticketController,
+                      focusNode: _focusNode,
                       textCapitalization: TextCapitalization.characters,
-                      onSubmitted: (_) => _submitTicket(),
+                      enabled: !_submitting,
+                      style: StitchTheme.body(
+                        size: 16,
+                        color: StitchTheme.parchment,
+                      ),
+                      onSubmitted: (_) => _validateTicket(),
                       decoration: InputDecoration(
-                        hintText: 'e.g. GLRY-2024-XXXX',
-                        prefixIcon: const Icon(Icons.confirmation_num_outlined),
+                        hintText: 'e.g. ADWA-1896',
+                        hintStyle: StitchTheme.body(
+                          size: 16,
+                          color: StitchTheme.muted,
+                        ),
+                        prefixIcon: const Icon(
+                          Icons.confirmation_number_outlined,
+                          color: StitchTheme.muted,
+                        ),
                         filled: true,
-                        fillColor: const Color(0xFFEFE5CE),
+                        fillColor: StitchTheme.obsidian,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(999),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 16,
                         ),
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    if (_errorMessage != null) ...<Widget>[
+                      const SizedBox(height: 14),
+                      Text(
+                        _errorMessage!,
+                        style: StitchTheme.body(
+                          size: 14,
+                          color: const Color(0xFF7F1425),
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 18),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton(
-                        onPressed: _submitTicket,
+                        onPressed: _submitting ? null : _validateTicket,
                         style: FilledButton.styleFrom(
                           backgroundColor: StitchTheme.adwaGold,
-                          foregroundColor: StitchTheme.darkText,
+                          foregroundColor: StitchTheme.ink,
+                          disabledBackgroundColor: StitchTheme.adwaGold
+                              .withValues(alpha: 0.45),
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(999),
                           ),
                         ),
-                        child: Text(
-                          'Activate Scanner',
-                          style: StitchTheme.overline(
-                            size: 12,
-                            color: StitchTheme.darkText,
-                            letterSpacing: 1.8,
-                          ),
-                        ),
+                        child:
+                            _submitting
+                                ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: StitchTheme.ink,
+                                  ),
+                                )
+                                : Text(
+                                  s.validateTicket,
+                                  style: StitchTheme.body(
+                                    size: 16,
+                                    weight: FontWeight.w700,
+                                    color: StitchTheme.ink,
+                                  ),
+                                ),
                       ),
                     ),
                   ],
@@ -208,9 +291,6 @@ class _StitchTicketValidationScreenState
           ),
         ),
       ),
-      bottomNavigationBar: widget.showBottomNav
-          ? const StitchBottomNav(activeIndex: 2, lightMode: true)
-          : null,
     );
   }
 }

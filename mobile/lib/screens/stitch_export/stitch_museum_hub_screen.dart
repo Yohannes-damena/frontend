@@ -1,263 +1,833 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_strings.dart';
+import '../../models/chat_args.dart';
+import '../../models/room.dart';
+import '../../services/api_service.dart';
+import '../../services/ticket_gate.dart';
+import '../../services/tour_session.dart';
+import '../../widgets/museum_network_image.dart';
+import '../../widgets/settings_icon_button.dart';
+import 'stitch_chat_screen.dart';
 import 'stitch_routes.dart';
 import 'stitch_theme.dart';
 
-class StitchMuseumHubScreen extends StatelessWidget {
-  const StitchMuseumHubScreen({super.key, this.showBottomNav = true});
+/// Explore tab — tour rooms from the active QR-started chain only.
+///
+/// Walks [Room.nextRoomId] from [TourSession.tourStartRoomId]. Never assumes
+/// a single museum's hardcoded sequence.
+class StitchMuseumHubScreen extends StatefulWidget {
+  const StitchMuseumHubScreen({
+    super.key,
+    this.showBottomNav = true,
+    this.onSwitchToScan,
+  });
 
   final bool showBottomNav;
+  final VoidCallback? onSwitchToScan;
+
+  @override
+  State<StitchMuseumHubScreen> createState() => _StitchMuseumHubScreenState();
+}
+
+class _StitchMuseumHubScreenState extends State<StitchMuseumHubScreen> {
+  final ApiService _api = ApiService();
+
+  List<Room>? _rooms;
+  Object? _error;
+  bool _loading = true;
+  bool _needsScan = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTour();
+  }
+
+  @override
+  void dispose() {
+    _api.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadTour() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+      _needsScan = false;
+    });
+
+    final String? startId = TourSession.tourStartRoomId;
+    if (startId == null || startId.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _rooms = <Room>[];
+        _needsScan = true;
+        _loading = false;
+      });
+      return;
+    }
+
+    try {
+      final List<Room> rooms = await _api.getTourRooms(startId: startId);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _rooms = rooms;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = e;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _openRoom(Room room) async {
+    final bool granted = await TicketGate.ensureAccess(context, room: room);
+    if (!mounted || !granted) {
+      return;
+    }
+    await Navigator.pushNamed(context, StitchRoutes.room, arguments: room);
+    if (mounted) {
+      await _loadTour();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final AppStrings s = AppStrings.of(context);
+
     return Scaffold(
-      backgroundColor: StitchTheme.parchmentLight,
-      body: SafeArea(
-        child: CustomScrollView(
-          slivers: <Widget>[
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 10, 24, 10),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: <Widget>[
-                    const CircleAvatar(
-                      radius: 20,
-                      backgroundImage: NetworkImage(
-                        'https://lh3.googleusercontent.com/aida-public/AB6AXuCBJLqsIZleBoTbgXtq6I1lgC4geIj9-CA33Pll68CYhc_ouplxlvGETPTAJ1-0GEIhPXOQqAyBFjx2gjxQc9s6bNGT_btCaJaIC4w4V_ogaIpc2VJes_h3SbkEduGBYOzwZzkIdwDyUpfXRU9k3wqyTJTbgOOU4QO0Ja9j_7GOaSpZJQmo2b94yV4YsqM9nwYEc_uIh3T8xUJV6WcigKznYN2gsxR934_5BFM3-fGnpqQxAGR8JX_jp2_bLBlGwepyHbC-a7sdRlv0',
-                      ),
+      backgroundColor: StitchTheme.darkText,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      floatingActionButton:
+          _rooms == null || _rooms!.isEmpty
+              ? null
+              : FloatingActionButton(
+                heroTag: 'tour-ai-guide',
+                tooltip: s.chatWithAiGuideTooltip,
+                onPressed: () {
+                  final Room room = _rooms!.first;
+                  showStitchChatSheet(
+                    context,
+                    args: ChatArgs(
+                      waypointId: room.id,
+                      contextTitle: room.title,
                     ),
-                    Text(
-                      'THE GALLERY',
-                      style: StitchTheme.headline(
-                        size: 24,
-                        color: StitchTheme.darkText,
-                        letterSpacing: 2.5,
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: () {},
-                      icon: const Icon(Icons.near_me_outlined),
-                    ),
-                  ],
+                  );
+                },
+                backgroundColor: StitchTheme.adwaGold,
+                foregroundColor: StitchTheme.ink,
+                elevation: 8,
+                shape: const CircleBorder(
+                  side: BorderSide(color: StitchTheme.panel, width: 2),
+                ),
+                child: const Icon(Icons.chat_bubble_outline),
+              ),
+      body: SafeArea(child: _buildBody(s)),
+      bottomNavigationBar:
+          widget.showBottomNav ? const StitchBottomNav(activeIndex: 0) : null,
+    );
+  }
+
+  Widget _buildBody(AppStrings s) {
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(color: StitchTheme.adwaGold),
+      );
+    }
+
+    if (_needsScan) {
+      return _ExploreEmptyState(strings: s, onScan: widget.onSwitchToScan);
+    }
+
+    if (_error != null || _rooms == null || _rooms!.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Text(
+                s.couldNotLoadTour,
+                style: StitchTheme.headline(
+                  size: 24,
+                  color: StitchTheme.parchment,
                 ),
               ),
+              const SizedBox(height: 12),
+              Text(
+                _error is ApiException
+                    ? (_error! as ApiException).message
+                    : s.pleaseTryAgain,
+                textAlign: TextAlign.center,
+                style: StitchTheme.body(size: 16, color: StitchTheme.muted),
+              ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: _loadTour,
+                style: FilledButton.styleFrom(
+                  backgroundColor: StitchTheme.adwaGold,
+                  foregroundColor: StitchTheme.ink,
+                ),
+                child: Text(s.retry),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final List<Room> rooms = _rooms!;
+    final Room hero = rooms.first;
+    final String? heroImage =
+        hero.items.isNotEmpty ? hero.items.first.imageUrl : null;
+
+    return CustomScrollView(
+      slivers: <Widget>[
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 8, 10),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 12),
+                    child: Text(
+                      s.yourTour,
+                      style: StitchTheme.overline(
+                        size: 12,
+                        color: StitchTheme.muted,
+                      ),
+                    ),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: widget.onSwitchToScan,
+                  icon: const Icon(
+                    Icons.qr_code_scanner,
+                    color: StitchTheme.muted,
+                    size: 20,
+                  ),
+                  label: Text(
+                    s.scan,
+                    style: StitchTheme.body(size: 14, color: StitchTheme.muted),
+                  ),
+                ),
+                const SettingsIconButton(color: StitchTheme.muted),
+              ],
             ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(28),
-                  child: Stack(
-                    children: <Widget>[
-                      SizedBox(
-                        height: 500,
-                        width: double.infinity,
-                        child: Image.network(
-                          'https://lh3.googleusercontent.com/aida-public/AB6AXuAglmNP8M5sSWoURD4f0l9YtehSqFHMqb32cEecwTO0nrVOe3p8TpYWx59bxn6eYNSK5efa0xhiCex_Hsgzv7RP4a3FM0sBP4PrB9d6zwn8uYhwOG6IzgiIGzToBmwfftp2S-uYXM-uaWVcIffW93TEIp19wvMKaHl27825B2kr3ziuxwBnerasui73F9QgCgDFkSesJ4TjSl0SVDgWx0Cabb6LCPj_0HcrvmQQTFcgXb_pXUgzY5lsdT93OVvg_RMivSzfeCa178E1',
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                      Positioned.fill(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: <Color>[
-                                Colors.transparent,
-                                StitchTheme.parchmentLight.withValues(alpha: 0.65),
-                                StitchTheme.parchmentLight.withValues(alpha: 0.95),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        left: 20,
-                        right: 20,
-                        bottom: 24,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.8),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Text(
-                                'CURRENT EXHIBITION',
-                                style: StitchTheme.overline(
-                                  size: 11,
-                                  color: StitchTheme.darkText,
-                                ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(28),
+              child: Stack(
+                children: <Widget>[
+                  SizedBox(
+                    height: 460,
+                    width: double.infinity,
+                    child:
+                        heroImage == null
+                            ? const ColoredBox(color: StitchTheme.panel)
+                            : MuseumNetworkImage(
+                              url: heroImage,
+                              fit: BoxFit.cover,
+                              fallback: const ColoredBox(
+                                color: StitchTheme.panel,
                               ),
                             ),
-                            const SizedBox(height: 10),
-                            Text(
-                              'Antiquity & Light',
-                              style: StitchTheme.headline(
-                                size: 48,
-                                color: StitchTheme.darkText,
-                                height: 1.0,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Explore the interplay of shadow and form in our newly curated collection of Hellenistic marbles.',
-                              style: StitchTheme.body(
-                                size: 17,
-                                color: StitchTheme.darkText.withValues(alpha: 0.8),
-                                height: 1.45,
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            FilledButton.icon(
-                              onPressed: () {
-                                Navigator.pushNamed(context, StitchRoutes.narration);
-                              },
-                              style: FilledButton.styleFrom(
-                                backgroundColor: StitchTheme.adwaGold,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-                              ),
-                              label: const Text('Enter Gallery'),
-                              icon: const Icon(Icons.arrow_forward),
-                            ),
+                  ),
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: <Color>[
+                            Colors.transparent,
+                            StitchTheme.heroScrim.withValues(alpha: 0.55),
+                            StitchTheme.heroScrim.withValues(alpha: 0.9),
                           ],
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 28, 24, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      'Curated Collections',
-                      style: StitchTheme.headline(
-                        size: 30,
-                        weight: FontWeight.w500,
-                        color: StitchTheme.darkText,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Hand-selected pieces from the archives',
-                      style: StitchTheme.body(
-                        size: 15,
-                        color: StitchTheme.slate.withValues(alpha: 0.8),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: 320,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  children: const <Widget>[
-                    _CollectionCard(
-                      image:
-                          'https://lh3.googleusercontent.com/aida-public/AB6AXuDP4BrTPHHvdT8TVzivVliPKsn3u87R_MOgzKTVPVOCvX9-xNcAulByvIBb-IwQKunsb7abp-cuG5-v6uJ2NdbDD9ol-uWFSNoZG9gEbPahG8FO6eUbgVmrK1pEKVL86sUetN7euX5c5qZcrvYSbdaixDIKFIeRhpfFx3sQ7AJ6jlqvP6vemsAubn5ekLt9V5tiYFtHsHww_7QtHjM-ELcRmMIr06sh5Oy6dM70IUPxt1wEZhlrzdNGwgCdc6qiVPbVQ66WT0UBYgBO',
-                      title: 'Renaissance Textures',
-                      subtitle: '12 Pieces',
-                    ),
-                    _CollectionCard(
-                      image:
-                          'https://lh3.googleusercontent.com/aida-public/AB6AXuALbMqVN0-M_uRV4etCYfJDjEUG40TWxFHAWrFGwcVzBoIUfMo1-pQMZvT9ui3ekwHnEMoaHZLDKgL1ABuXwJ3z44_rDhx2ICxm7mX-nkdDulDBAb8x2wJwfmC0LXmNpurOA9t_5volEeVciZDob0oecIsqYrtvWU0Blnbqgs6P7Kx_ykPyN7-j7giXNByIqQYM6CjRiM3blgsNZJEINCavk9JWDVUCSwJKbC_aYsvCyUAnK2n5FBFeeXJ-h74MAAO5hfjZbnxVfit6',
-                      title: 'The Gold Room',
-                      subtitle: '8 Artifacts',
-                    ),
-                    _CollectionCard(
-                      image:
-                          'https://lh3.googleusercontent.com/aida-public/AB6AXuAde5U_fpGAKRQXfLosXCVdq0IGj4iYa9Ugjl10_uBQYwemTy4-b4oIxoX-NJOO9sW4xGBdmvqOP23Emonc2k7dGG9mSdPB7eCmvlE6c_5kB6EKIJC4ESc8AriQx1FEh1ekWNsYqZOvkyDO4XMu0VxwCafIcUeGCkX8xbLc4E8xInnV8txUdeUaenaueBE4oSWE2sbx2-ulwsrnUl7wSPkuIbpJtolcPTl6nz7ooxaBdPlSR6yrxjqDVBrz72HvXg2tryM2sl0uUQeP',
-                      title: 'Bronze Age Forms',
-                      subtitle: '24 Sculptures',
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SliverToBoxAdapter(child: SizedBox(height: 110)),
-          ],
-        ),
-      ),
-      bottomNavigationBar: showBottomNav
-          ? const StitchBottomNav(activeIndex: 0, lightMode: true)
-          : null,
-    );
-  }
-}
-
-class _CollectionCard extends StatelessWidget {
-  const _CollectionCard({
-    required this.image,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final String image;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 270,
-      margin: const EdgeInsets.only(right: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: Stack(
-                fit: StackFit.expand,
-                children: <Widget>[
-                  Image.network(image, fit: BoxFit.cover),
                   Positioned(
-                    top: 12,
-                    right: 12,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.7),
-                        shape: BoxShape.circle,
-                      ),
-                      padding: const EdgeInsets.all(8),
-                      child: const Icon(Icons.bookmark_border),
+                    left: 20,
+                    right: 20,
+                    bottom: 24,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: StitchTheme.panel,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            s.roomNumberOf(hero.storyOrder, rooms.length),
+                            style: StitchTheme.overline(
+                              size: 11,
+                              color: StitchTheme.muted,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          hero.title,
+                          style: StitchTheme.headline(
+                            size: 36,
+                            color: StitchTheme.heroText,
+                            height: 1.05,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          hero.roomOverviewText,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: StitchTheme.body(
+                            size: 16,
+                            color: StitchTheme.heroText.withValues(alpha: 0.86),
+                            height: 1.45,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        FilledButton.icon(
+                          onPressed: () => _openRoom(hero),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: StitchTheme.adwaGold,
+                            foregroundColor: StitchTheme.ink,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 22,
+                              vertical: 14,
+                            ),
+                          ),
+                          label: Text(s.enterRoom),
+                          icon: const Icon(Icons.arrow_forward),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 10),
-          Text(
-            title,
-            style: StitchTheme.headline(
-              size: 22,
-              color: StitchTheme.darkText,
-              weight: FontWeight.w500,
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  s.tourRooms,
+                  style: StitchTheme.headline(
+                    size: 28,
+                    weight: FontWeight.w500,
+                    color: StitchTheme.parchment,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  s.tourRoomsHint,
+                  style: StitchTheme.body(size: 15, color: StitchTheme.muted),
+                ),
+              ],
             ),
           ),
-          Text(
-            subtitle,
-            style: StitchTheme.body(
-              size: 14,
-              color: StitchTheme.slate.withValues(alpha: 0.75),
+        ),
+        SliverToBoxAdapter(
+          child: SizedBox(
+            height: 300,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: rooms.length,
+              itemBuilder: (BuildContext context, int index) {
+                final Room room = rooms[index];
+                return _RoomCard(room: room, onTap: () => _openRoom(room));
+              },
+            ),
+          ),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 110)),
+      ],
+    );
+  }
+}
+
+class _RoomCard extends StatelessWidget {
+  const _RoomCard({required this.room, required this.onTap});
+
+  final Room room;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings s = AppStrings.of(context);
+    final String? image =
+        room.items.isNotEmpty ? room.items.first.imageUrl : null;
+
+    return Padding(
+      padding: const EdgeInsets.only(right: 16),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: SizedBox(
+            width: 240,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child:
+                        image == null
+                            ? const ColoredBox(color: StitchTheme.panel)
+                            : MuseumNetworkImage(
+                              url: image,
+                              fit: BoxFit.cover,
+                              width: double.infinity,
+                              fallback: const ColoredBox(
+                                color: StitchTheme.panel,
+                              ),
+                            ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  s.roomNumber(room.storyOrder),
+                  style: StitchTheme.overline(
+                    size: 10,
+                    color: StitchTheme.muted,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  room.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: StitchTheme.headline(
+                    size: 20,
+                    color: StitchTheme.parchment,
+                    weight: FontWeight.w500,
+                  ),
+                ),
+                Text(
+                  s.itemCount(room.items.length),
+                  style: StitchTheme.body(size: 14, color: StitchTheme.muted),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Static "Museums on this app" directory — presentation-only metadata.
+// Not wired to any API. Does not start a tour or open a room.
+// ---------------------------------------------------------------------------
+
+/// Hardcoded museum cards shown on the Explore empty state.
+///
+/// FLAG: Third entry uses `Lovuran.png` as the image asset the team provided.
+/// Filename appears to reference the Louvre, but name / description / location
+/// are intentionally left as placeholders until the team confirms details.
+class _SupportedMuseum {
+  const _SupportedMuseum({
+    required this.name,
+    required this.locationTag,
+    required this.locationFull,
+    required this.description,
+    required this.imageAsset,
+    this.isPlaceholder = false,
+  });
+
+  final String name;
+  final String locationTag;
+  final String locationFull;
+  final String description;
+  final String imageAsset;
+  final bool isPlaceholder;
+}
+
+const List<_SupportedMuseum> _supportedMuseums = <_SupportedMuseum>[
+  _SupportedMuseum(
+    name: 'Adwa Museum',
+    locationTag: 'Adwa Museum · Adwa, Tigray',
+    locationFull: 'Adwa, Tigray Region, Ethiopia',
+    description:
+        'Dedicated to the Battle of Adwa (1896), where Ethiopian forces '
+        'defeated an invading Italian army — one of the only successful '
+        'African resistances to European colonization.',
+    imageAsset: 'assets/images/outerimages/adwa.png',
+  ),
+  _SupportedMuseum(
+    name: 'National Museum of Ethiopia',
+    locationTag: '6 Kilo Museum · Addis Ababa',
+    locationFull:
+        'King George VI Street, Addis Ababa, near Addis Ababa '
+        "University's graduate school",
+    description:
+        'Home to "Lucy" (Dinkinesh), the 3.2-million-year-old '
+        'Australopithecus afarensis fossil that reshaped understanding of '
+        'human origins, alongside Ethiopian manuscripts and royal artifacts.',
+    imageAsset: 'assets/images/outerimages/6killo.png',
+  ),
+  // PLACEHOLDER — do not invent details. Confirm name, description, location,
+  // and whether Lovuran.png is the correct image with the team.
+  _SupportedMuseum(
+    name: '[Third museum — TBD]',
+    locationTag: 'Location to be confirmed',
+    locationFull: 'Location to be confirmed with the team',
+    description:
+        'PLACEHOLDER: Name, description, location, and final image for this '
+        'museum are pending team confirmation. Do not treat this card as '
+        'final content.',
+    imageAsset: 'assets/images/outerimages/Lovuran.png',
+    isPlaceholder: true,
+  ),
+];
+
+/// Empty Explore state: existing scan CTA + museums directory section.
+class _ExploreEmptyState extends StatelessWidget {
+  const _ExploreEmptyState({required this.strings, required this.onScan});
+
+  final AppStrings strings;
+  final VoidCallback? onScan;
+
+  void _openOverview(BuildContext context, _SupportedMuseum museum) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _MuseumOverviewScreen(museum: museum),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomScrollView(
+      slivers: <Widget>[
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(32, 48, 32, 8),
+            child: Column(
+              children: <Widget>[
+                const Icon(
+                  Icons.qr_code_scanner,
+                  size: 56,
+                  color: StitchTheme.muted,
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  strings.scanToStartTour,
+                  textAlign: TextAlign.center,
+                  style: StitchTheme.headline(
+                    size: 24,
+                    color: StitchTheme.parchment,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  strings.scanToStartTourBody,
+                  textAlign: TextAlign.center,
+                  style: StitchTheme.body(size: 16, color: StitchTheme.muted),
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: onScan,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: StitchTheme.adwaGold,
+                    foregroundColor: StitchTheme.ink,
+                  ),
+                  icon: const Icon(Icons.qr_code_scanner),
+                  label: Text(strings.scan),
+                ),
+              ],
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 36, 24, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'MUSEUMS ON THIS APP',
+                  style: StitchTheme.overline(
+                    size: 12,
+                    color: StitchTheme.muted,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Informational only — scan a room QR to start a tour.',
+                  style: StitchTheme.body(size: 15, color: StitchTheme.muted),
+                ),
+              ],
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: SizedBox(
+            height: 280,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _supportedMuseums.length,
+              itemBuilder: (BuildContext context, int index) {
+                final _SupportedMuseum museum = _supportedMuseums[index];
+                return _MuseumCard(
+                  museum: museum,
+                  onTap: () => _openOverview(context, museum),
+                );
+              },
+            ),
+          ),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 48)),
+      ],
+    );
+  }
+}
+
+class _MuseumCard extends StatelessWidget {
+  const _MuseumCard({required this.museum, required this.onTap});
+
+  final _SupportedMuseum museum;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 16),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: SizedBox(
+            width: 240,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: <Widget>[
+                        Image.asset(
+                          museum.imageAsset,
+                          fit: BoxFit.cover,
+                          errorBuilder:
+                              (_, __, ___) =>
+                                  const ColoredBox(color: StitchTheme.panel),
+                        ),
+                        if (museum.isPlaceholder)
+                          Align(
+                            alignment: Alignment.topLeft,
+                            child: Padding(
+                              padding: const EdgeInsets.all(10),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: StitchTheme.panel,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  'PLACEHOLDER',
+                                  style: StitchTheme.overline(
+                                    size: 10,
+                                    color: StitchTheme.muted,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  museum.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: StitchTheme.headline(
+                    size: 20,
+                    color: StitchTheme.parchment,
+                    weight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  museum.locationTag,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: StitchTheme.body(size: 14, color: StitchTheme.muted),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Informational museum overview — no tour start, no room navigation.
+class _MuseumOverviewScreen extends StatelessWidget {
+  const _MuseumOverviewScreen({required this.museum});
+
+  final _SupportedMuseum museum;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: StitchTheme.darkText,
+      body: CustomScrollView(
+        slivers: <Widget>[
+          SliverAppBar(
+            expandedHeight: 280,
+            pinned: true,
+            backgroundColor: StitchTheme.darkText,
+            foregroundColor: StitchTheme.ink,
+            flexibleSpace: FlexibleSpaceBar(
+              background: Stack(
+                fit: StackFit.expand,
+                children: <Widget>[
+                  Image.asset(
+                    museum.imageAsset,
+                    fit: BoxFit.cover,
+                    errorBuilder:
+                        (_, __, ___) =>
+                            const ColoredBox(color: StitchTheme.panel),
+                  ),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: <Color>[
+                          Colors.transparent,
+                          StitchTheme.heroScrim.withValues(alpha: 0.75),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 48),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  if (museum.isPlaceholder) ...<Widget>[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: StitchTheme.ember,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        'PLACEHOLDER — CONFIRM WITH TEAM',
+                        style: StitchTheme.overline(
+                          size: 10,
+                          color: StitchTheme.muted,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                  Text(
+                    museum.name,
+                    style: StitchTheme.headline(
+                      size: 32,
+                      color: StitchTheme.parchment,
+                      height: 1.1,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      const Padding(
+                        padding: EdgeInsets.only(top: 2),
+                        child: Icon(
+                          Icons.place_outlined,
+                          size: 18,
+                          color: StitchTheme.adwaGold,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          museum.locationFull,
+                          style: StitchTheme.body(
+                            size: 15,
+                            color: StitchTheme.muted,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    museum.description,
+                    style: StitchTheme.body(
+                      size: 16,
+                      color: StitchTheme.parchment,
+                      height: 1.55,
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  Text(
+                    'To visit rooms in this museum, scan a room QR code. '
+                    'This overview does not start a tour.',
+                    style: StitchTheme.body(
+                      size: 14,
+                      color: StitchTheme.muted,
+                      height: 1.45,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
